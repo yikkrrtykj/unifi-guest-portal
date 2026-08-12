@@ -21,11 +21,21 @@ from itsdangerous import (
     SignatureExpired
 )
 
+from rate_limit import (
+    clear_failures,
+    rate_limit_key,
+    record_failure,
+    retry_after,
+)
+
 
 app = Flask(__name__)
 
 
-DB_PATH = "/opt/unifi-portal/portal.db"
+DB_PATH = os.environ.get(
+    "PORTAL_DB_PATH",
+    "/opt/unifi-portal/portal.db"
+)
 
 ADMIN_USER = os.environ.get(
     "ADMIN_USER",
@@ -70,6 +80,27 @@ AUTH_MINUTES = int(
         "480"
     )
 )
+
+ACCESS_CODE_MAX_FAILURES = int(
+    os.environ.get(
+        "ACCESS_CODE_MAX_FAILURES",
+        "5"
+    )
+)
+
+ACCESS_CODE_WINDOW_SECONDS = int(
+    os.environ.get(
+        "ACCESS_CODE_WINDOW_SECONDS",
+        "600"
+    )
+)
+
+ACCESS_CODE_BLOCK_SECONDS = int(
+    os.environ.get(
+        "ACCESS_CODE_BLOCK_SECONDS",
+        "900"
+    )
+)
 PORTAL_ACCESS_CODE = os.environ.get(
     "PORTAL_ACCESS_CODE",
     ""
@@ -87,6 +118,26 @@ PORTAL_SECRET = os.environ.get(
 if not PORTAL_SECRET:
     raise RuntimeError(
         "PORTAL_SECRET is not configured"
+    )
+
+if not ADMIN_USER.strip():
+    raise RuntimeError(
+        "ADMIN_USER is not configured"
+    )
+
+if not ADMIN_PASSWORD.strip():
+    raise RuntimeError(
+        "ADMIN_PASSWORD is not configured"
+    )
+
+if (
+    ACCESS_CODE_MAX_FAILURES < 1
+    or ACCESS_CODE_WINDOW_SECONDS < 1
+    or ACCESS_CODE_BLOCK_SECONDS < 1
+):
+    raise RuntimeError(
+        "Access code rate-limit values "
+        "must be positive integers"
     )
 
 
@@ -124,59 +175,74 @@ def get_db():
 def init_db():
     conn = get_db()
 
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS guests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            client_mac TEXT,
-            ap_mac TEXT,
-            ssid TEXT,
-            site TEXT,
-            original_url TEXT,
-            remote_ip TEXT,
-            created_at TEXT NOT NULL
+    try:
+        conn.execute(
+            "PRAGMA journal_mode=WAL"
         )
-    """)
+        conn.execute("BEGIN IMMEDIATE")
 
-    columns = {
-        row["name"]
-        for row in conn.execute(
-            "PRAGMA table_info(guests)"
-        ).fetchall()
-    }
-
-    if "authorized" not in columns:
         conn.execute("""
-            ALTER TABLE guests
-            ADD COLUMN authorized INTEGER
-            NOT NULL DEFAULT 0
+            CREATE TABLE IF NOT EXISTS guests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                client_mac TEXT,
+                ap_mac TEXT,
+                ssid TEXT,
+                site TEXT,
+                original_url TEXT,
+                remote_ip TEXT,
+                created_at TEXT NOT NULL,
+                authorized INTEGER NOT NULL DEFAULT 0,
+                authorized_at TEXT,
+                expires_at TEXT,
+                auth_error TEXT,
+                registration_state TEXT
+                    NOT NULL DEFAULT 'complete'
+            )
         """)
 
-    if "authorized_at" not in columns:
-        conn.execute("""
-            ALTER TABLE guests
-            ADD COLUMN authorized_at TEXT
-        """)
+        columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(guests)"
+            ).fetchall()
+        }
 
-    if "expires_at" not in columns:
-        conn.execute("""
-            ALTER TABLE guests
-            ADD COLUMN expires_at TEXT
-        """)
+        migrations = {
+            "authorized":
+                "INTEGER NOT NULL DEFAULT 0",
 
-    if "auth_error" not in columns:
-        conn.execute("""
-            ALTER TABLE guests
-            ADD COLUMN auth_error TEXT
-        """)
+            "authorized_at":
+                "TEXT",
 
-    conn.execute(
-        "PRAGMA journal_mode=WAL"
-    )
+            "expires_at":
+                "TEXT",
 
-    conn.commit()
-    conn.close()
+            "auth_error":
+                "TEXT",
+
+            "registration_state":
+                "TEXT NOT NULL DEFAULT 'complete'",
+        }
+
+        for column, definition in migrations.items():
+            if column not in columns:
+                conn.execute(
+                    f"""
+                    ALTER TABLE guests
+                    ADD COLUMN {column} {definition}
+                    """
+                )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
 
 
 init_db()
@@ -186,6 +252,9 @@ def check_admin():
     auth = request.authorization
 
     if not auth:
+        return False
+
+    if not ADMIN_USER or not ADMIN_PASSWORD:
         return False
 
     return (
@@ -379,6 +448,106 @@ def authorize_guest(
         )
 
 
+def unauthorize_guest(mac, site):
+    if not UNIFI_USERNAME or not UNIFI_PASSWORD:
+        return False
+
+    session = requests.Session()
+    session.verify = UNIFI_VERIFY_TLS
+
+    try:
+        login = session.post(
+            UNIFI_URL + "/api/login",
+            json={
+                "username": UNIFI_USERNAME,
+                "password": UNIFI_PASSWORD,
+                "remember": True
+            },
+            timeout=10
+        )
+
+        if not login.ok:
+            return False
+
+        revoke = session.post(
+            UNIFI_URL
+            + f"/api/s/{site}/cmd/stamgr",
+            json={
+                "cmd": "unauthorize-guest",
+                "mac": mac
+            },
+            timeout=10
+        )
+
+        if not revoke.ok:
+            return False
+
+        result = revoke.json()
+
+        return (
+            result
+            .get("meta", {})
+            .get("rc") == "ok"
+        )
+
+    except (
+        requests.RequestException,
+        ValueError
+    ):
+        return False
+
+
+def client_ip():
+    return request.headers.get(
+        "X-Real-IP",
+        request.remote_addr or "unknown"
+    )
+
+
+def access_code_limit_keys(client_mac):
+    return (
+        rate_limit_key(
+            PORTAL_SECRET,
+            "guest-ip",
+            client_ip()
+        ),
+        rate_limit_key(
+            PORTAL_SECRET,
+            "guest-mac",
+            client_mac
+        ),
+    )
+
+
+def access_code_retry_after(client_mac):
+    return retry_after(
+        DB_PATH,
+        access_code_limit_keys(client_mac)
+    )
+
+
+def record_access_code_failure(client_mac):
+    waits = [
+        record_failure(
+            DB_PATH,
+            key,
+            ACCESS_CODE_MAX_FAILURES,
+            ACCESS_CODE_WINDOW_SECONDS,
+            ACCESS_CODE_BLOCK_SECONDS,
+        )
+        for key in access_code_limit_keys(client_mac)
+    ]
+
+    return max(waits)
+
+
+def clear_access_code_failures(client_mac):
+    clear_failures(
+        DB_PATH,
+        access_code_limit_keys(client_mac)
+    )
+
+
 def get_active_guest(mac):
     conn = get_db()
 
@@ -387,6 +556,7 @@ def get_active_guest(mac):
         FROM guests
         WHERE client_mac = ?
           AND authorized = 1
+          AND registration_state = 'complete'
           AND expires_at IS NOT NULL
         ORDER BY id DESC
         LIMIT 1
@@ -658,17 +828,62 @@ def handle_portal(site):
         .get("phone", "")
         .strip()
     )
-    if not secrets.compare_digest(
-        access_code,
-        PORTAL_ACCESS_CODE
-    ):
+
+    wait_seconds = access_code_retry_after(
+        client_mac
+    )
+
+    if wait_seconds:
         return render_template(
             "index.html",
             portal_token=token,
             name=name,
             phone=phone,
-            error="Incorrect access code."
-        ), 400
+            error=(
+                "Too many incorrect access code "
+                "attempts. Please wait before "
+                "trying again."
+            )
+        ), 429, {
+            "Retry-After": str(wait_seconds)
+        }
+
+    if not secrets.compare_digest(
+        access_code,
+        PORTAL_ACCESS_CODE
+    ):
+        wait_seconds = (
+            record_access_code_failure(
+                client_mac
+            )
+        )
+
+        error = "Incorrect access code."
+
+        if wait_seconds:
+            error = (
+                "Too many incorrect access code "
+                "attempts. Please wait before "
+                "trying again."
+            )
+
+        return render_template(
+            "index.html",
+            portal_token=token,
+            name=name,
+            phone=phone,
+            error=error
+        ), (429 if wait_seconds else 400), (
+            {
+                "Retry-After": str(wait_seconds)
+            }
+            if wait_seconds
+            else {}
+        )
+
+    clear_access_code_failures(
+        client_mac
+    )
 
     if not valid_name(name):
         return render_template(
@@ -706,6 +921,70 @@ def handle_portal(site):
         )
     )
 
+    conn = None
+
+    try:
+        conn = get_db()
+
+        cursor = conn.execute("""
+            INSERT INTO guests (
+                name,
+                phone,
+                client_mac,
+                ap_mac,
+                ssid,
+                site,
+                original_url,
+                remote_ip,
+                created_at,
+                authorized,
+                authorized_at,
+                expires_at,
+                auth_error,
+                registration_state
+            )
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                0, NULL, NULL, NULL, 'pending'
+            )
+        """, (
+            name,
+            phone,
+            client_mac,
+            ap_mac,
+            ssid,
+            site,
+            original_url,
+            client_ip(),
+            now.isoformat()
+        ))
+
+        guest_id = cursor.lastrowid
+        conn.commit()
+
+    except sqlite3.Error:
+        if conn:
+            conn.rollback()
+
+        app.logger.exception(
+            "Unable to create pending guest record"
+        )
+
+        return render_template(
+            "index.html",
+            portal_token=token,
+            name=name,
+            phone=phone,
+            error=(
+                "Unable to save this registration. "
+                "Please try again."
+            )
+        ), 503
+
+    finally:
+        if conn:
+            conn.close()
+
     ok, auth_error = authorize_guest(
         client_mac,
         site,
@@ -713,6 +992,32 @@ def handle_portal(site):
     )
 
     if not ok:
+        cleanup_conn = None
+
+        try:
+            cleanup_conn = get_db()
+
+            cleanup_conn.execute(
+                "DELETE FROM guests WHERE id = ? "
+                "AND registration_state = 'pending'",
+                (guest_id,)
+            )
+            cleanup_conn.commit()
+
+        except sqlite3.Error:
+            if cleanup_conn:
+                cleanup_conn.rollback()
+
+            app.logger.exception(
+                "Unable to remove failed pending "
+                "guest record id=%s",
+                guest_id
+            )
+
+        finally:
+            if cleanup_conn:
+                cleanup_conn.close()
+
         return render_template(
             "index.html",
             portal_token=token,
@@ -724,47 +1029,109 @@ def handle_portal(site):
             )
         ), 503
 
-    conn = get_db()
+    finalize_conn = None
 
-    conn.execute("""
-        INSERT INTO guests (
-            name,
-            phone,
+    try:
+        finalize_conn = get_db()
+
+        cursor = finalize_conn.execute("""
+            UPDATE guests
+            SET authorized = 1,
+                authorized_at = ?,
+                expires_at = ?,
+                auth_error = NULL,
+                registration_state = 'complete'
+            WHERE id = ?
+              AND registration_state = 'pending'
+        """, (
+            now.isoformat(),
+            expires.isoformat(),
+            guest_id
+        ))
+
+        if cursor.rowcount != 1:
+            raise sqlite3.DatabaseError(
+                "Pending guest record was not finalized"
+            )
+
+        finalize_conn.commit()
+
+    except sqlite3.Error:
+        if finalize_conn:
+            finalize_conn.rollback()
+
+        compensated = unauthorize_guest(
             client_mac,
-            ap_mac,
-            ssid,
-            site,
-            original_url,
-            remote_ip,
-            created_at,
-            authorized,
-            authorized_at,
-            expires_at,
-            auth_error
+            site
         )
-        VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            1, ?, ?, NULL
-        )
-    """, (
-        name,
-        phone,
-        client_mac,
-        ap_mac,
-        ssid,
-        site,
-        original_url,
-        request.headers.get(
-            "X-Real-IP",
-            request.remote_addr
-        ),
-        now.isoformat(),
-        now.isoformat(),
-        expires.isoformat()
-    ))
 
-    conn.commit()
-    conn.close()
+        app.logger.exception(
+            "Unable to finalize guest record "
+            "id=%s compensation_ok=%s",
+            guest_id,
+            compensated
+        )
+
+        recovery_conn = None
+
+        try:
+            recovery_conn = get_db()
+
+            recovery_conn.execute("""
+                UPDATE guests
+                SET authorized = ?,
+                    expires_at = ?,
+                    auth_error = ?,
+                    registration_state = 'failed'
+                WHERE id = ?
+            """, (
+                0 if compensated else 1,
+                (
+                    utcnow().isoformat()
+                    if compensated
+                    else expires.isoformat()
+                ),
+                (
+                    "Database finalization failed; "
+                    "compensation "
+                    + (
+                        "succeeded"
+                        if compensated
+                        else "failed"
+                    )
+                ),
+                guest_id
+            ))
+            recovery_conn.commit()
+
+        except sqlite3.Error:
+            if recovery_conn:
+                recovery_conn.rollback()
+
+            app.logger.exception(
+                "Unable to record failed guest "
+                "finalization id=%s",
+                guest_id
+            )
+
+        finally:
+            if recovery_conn:
+                recovery_conn.close()
+
+        return render_template(
+            "index.html",
+            portal_token=token,
+            name=name,
+            phone=phone,
+            error=(
+                "Unable to complete network "
+                "access. Please try again."
+            )
+        ), 503
+
+    finally:
+        if finalize_conn:
+            finalize_conn.close()
 
     return portal_success(
         name,

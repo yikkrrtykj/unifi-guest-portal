@@ -51,6 +51,8 @@ Do not commit:
 
 These are already covered by `.gitignore` where applicable.
 
+The services fail closed when required administrator usernames or passwords are blank. Guest access-code failures and staff sign-in failures are rate-limited through hashed identifiers stored in SQLite; raw rate-limit IP, MAC and username identifiers are not stored.
+
 Because the system can collect mobile or passport information, use HTTPS before production deployment and restrict the staff dashboard to trusted staff/police networks where possible.
 
 ## 1. Server requirements
@@ -128,6 +130,14 @@ UNIFI_VERIFY_TLS=false
 
 # Guest authorization period in minutes
 AUTH_MINUTES=480
+
+# Brute-force protection (seconds except *_MAX_FAILURES)
+ACCESS_CODE_MAX_FAILURES=5
+ACCESS_CODE_WINDOW_SECONDS=600
+ACCESS_CODE_BLOCK_SECONDS=900
+STAFF_LOGIN_MAX_FAILURES=5
+STAFF_LOGIN_WINDOW_SECONDS=600
+STAFF_LOGIN_BLOCK_SECONDS=900
 
 # Leave false while testing with HTTP.
 # Change to true after HTTPS is enabled.
@@ -262,6 +272,8 @@ Internet access
 The default authorization period is 480 minutes (8 hours).
 
 During that active period, if the same MAC returns to the portal, the application can restore the remaining authorization instead of asking for another registration.
+
+New registrations are first stored with a pending state, then authorized through UniFi, and finally marked complete. If final database persistence fails after authorization, the portal attempts an immediate compensating `unauthorize-guest` call and records the registration as failed.
 
 ## 7. Input validation
 
@@ -447,7 +459,10 @@ journalctl -u nginx -f
 ```text
 .
 ├── app.py
+├── rate_limit.py
 ├── staff_app.py
+├── tests/
+│   └── test_security.py
 ├── templates/
 │   ├── index.html
 │   ├── success.html

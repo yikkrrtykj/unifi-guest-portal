@@ -23,12 +23,22 @@ from itsdangerous import (
     SignatureExpired,
 )
 
+from rate_limit import (
+    clear_failures,
+    rate_limit_key,
+    record_failure,
+    retry_after,
+)
+
 
 app = Flask(__name__)
 app.logger.setLevel("INFO")
 
 
-DB_PATH = "/opt/unifi-portal/portal.db"
+DB_PATH = os.environ.get(
+    "PORTAL_DB_PATH",
+    "/opt/unifi-portal/portal.db"
+)
 
 STAFF_USER = os.environ.get(
     "STAFF_USER",
@@ -79,8 +89,34 @@ STAFF_COOKIE_SECURE = (
     ).lower() == "true"
 )
 
+STAFF_LOGIN_MAX_FAILURES = int(
+    os.environ.get(
+        "STAFF_LOGIN_MAX_FAILURES",
+        "5"
+    )
+)
 
-if not STAFF_PASSWORD:
+STAFF_LOGIN_WINDOW_SECONDS = int(
+    os.environ.get(
+        "STAFF_LOGIN_WINDOW_SECONDS",
+        "600"
+    )
+)
+
+STAFF_LOGIN_BLOCK_SECONDS = int(
+    os.environ.get(
+        "STAFF_LOGIN_BLOCK_SECONDS",
+        "900"
+    )
+)
+
+
+if not STAFF_USER.strip():
+    raise RuntimeError(
+        "STAFF_USER is not configured"
+    )
+
+if not STAFF_PASSWORD.strip():
     raise RuntimeError(
         "STAFF_PASSWORD is not configured"
     )
@@ -88,6 +124,16 @@ if not STAFF_PASSWORD:
 if not PORTAL_SECRET:
     raise RuntimeError(
         "PORTAL_SECRET is not configured"
+    )
+
+if (
+    STAFF_LOGIN_MAX_FAILURES < 1
+    or STAFF_LOGIN_WINDOW_SECONDS < 1
+    or STAFF_LOGIN_BLOCK_SECONDS < 1
+):
+    raise RuntimeError(
+        "Staff login rate-limit values "
+        "must be positive integers"
     )
 
 
@@ -143,58 +189,94 @@ def get_db():
 def init_db():
     conn = get_db()
 
-    columns = {
-        row["name"]
-        for row in conn.execute(
-            "PRAGMA table_info(guests)"
-        ).fetchall()
-    }
-
-    migrations = {
-        "authorized":
-            "INTEGER NOT NULL DEFAULT 0",
-
-        "authorized_at":
-            "TEXT",
-
-        "expires_at":
-            "TEXT",
-
-        "auth_error":
-            "TEXT",
-
-        "revoked_at":
-            "TEXT",
-
-        "revoked_by":
-            "TEXT",
-    }
-
-    for column, definition in migrations.items():
-
-        if column not in columns:
-
-            conn.execute(
-                f"""
-                ALTER TABLE guests
-                ADD COLUMN {column} {definition}
-                """
-            )
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS staff_actions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guest_id INTEGER,
-            action TEXT NOT NULL,
-            actor TEXT NOT NULL,
-            client_mac TEXT,
-            result TEXT,
-            created_at TEXT NOT NULL
+    try:
+        conn.execute(
+            "PRAGMA journal_mode=WAL"
         )
-    """)
+        conn.execute("BEGIN IMMEDIATE")
 
-    conn.commit()
-    conn.close()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS guests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                client_mac TEXT,
+                ap_mac TEXT,
+                ssid TEXT,
+                site TEXT,
+                original_url TEXT,
+                remote_ip TEXT,
+                created_at TEXT NOT NULL,
+                authorized INTEGER NOT NULL DEFAULT 0,
+                authorized_at TEXT,
+                expires_at TEXT,
+                auth_error TEXT,
+                registration_state TEXT
+                    NOT NULL DEFAULT 'complete',
+                revoked_at TEXT,
+                revoked_by TEXT
+            )
+        """)
+
+        columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(guests)"
+            ).fetchall()
+        }
+
+        migrations = {
+            "authorized":
+                "INTEGER NOT NULL DEFAULT 0",
+
+            "authorized_at":
+                "TEXT",
+
+            "expires_at":
+                "TEXT",
+
+            "auth_error":
+                "TEXT",
+
+            "registration_state":
+                "TEXT NOT NULL DEFAULT 'complete'",
+
+            "revoked_at":
+                "TEXT",
+
+            "revoked_by":
+                "TEXT",
+        }
+
+        for column, definition in migrations.items():
+            if column not in columns:
+                conn.execute(
+                    f"""
+                    ALTER TABLE guests
+                    ADD COLUMN {column} {definition}
+                    """
+                )
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS staff_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guest_id INTEGER,
+                action TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                client_mac TEXT,
+                result TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
 
 
 init_db()
@@ -203,6 +285,57 @@ init_db()
 def logged_in():
     return bool(
         session.get("staff_user")
+    )
+
+
+def client_ip():
+    return request.headers.get(
+        "X-Real-IP",
+        request.remote_addr or "unknown"
+    )
+
+
+def staff_login_limit_keys(username):
+    return (
+        rate_limit_key(
+            PORTAL_SECRET,
+            "staff-ip",
+            client_ip()
+        ),
+        rate_limit_key(
+            PORTAL_SECRET,
+            "staff-user",
+            username or "empty"
+        ),
+    )
+
+
+def staff_login_retry_after(username):
+    return retry_after(
+        DB_PATH,
+        staff_login_limit_keys(username)
+    )
+
+
+def record_staff_login_failure(username):
+    waits = [
+        record_failure(
+            DB_PATH,
+            key,
+            STAFF_LOGIN_MAX_FAILURES,
+            STAFF_LOGIN_WINDOW_SECONDS,
+            STAFF_LOGIN_BLOCK_SECONDS,
+        )
+        for key in staff_login_limit_keys(username)
+    ]
+
+    return max(waits)
+
+
+def clear_staff_login_failures(username):
+    clear_failures(
+        DB_PATH,
+        staff_login_limit_keys(username)
     )
 
 
@@ -500,6 +633,27 @@ def staff_login():
             .get("password", "")
         )
 
+        wait_seconds = staff_login_retry_after(
+            username
+        )
+
+        if wait_seconds:
+            app.logger.warning(
+                "STAFF_LOGIN_RATE_LIMITED user=%s ip=%s",
+                username,
+                client_ip()
+            )
+
+            return render_template(
+                "staff_login.html",
+                error=(
+                    "Too many sign-in attempts. "
+                    "Please wait before trying again."
+                )
+            ), 429, {
+                "Retry-After": str(wait_seconds)
+            }
+
         valid = (
             secrets.compare_digest(
                 username,
@@ -513,6 +667,10 @@ def staff_login():
         )
 
         if valid:
+            clear_staff_login_failures(
+                username
+            )
+
             app.logger.info(
                 "STAFF_LOGIN_SUCCESS user=%s ip=%s",
                 username,
@@ -540,6 +698,21 @@ def staff_login():
                 request.remote_addr
             )
         )
+
+        wait_seconds = record_staff_login_failure(
+            username
+        )
+
+        if wait_seconds:
+            return render_template(
+                "staff_login.html",
+                error=(
+                    "Too many sign-in attempts. "
+                    "Please wait before trying again."
+                )
+            ), 429, {
+                "Retry-After": str(wait_seconds)
+            }
 
         error = "Incorrect username or password."
 
