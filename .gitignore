@@ -1,0 +1,33 @@
+# Secrets / runtime configuration
+.env
+.env.*
+!.env.example
+/etc/unifi-portal.env
+
+# Guest data / SQLite runtime files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Logs / runtime output
+*.log
+*.pid
+*.sock
+
+# Local backups / editor files
+*.bak
+*.backup
+*~
+.vscode/
+.idea/
+.DS_Store
