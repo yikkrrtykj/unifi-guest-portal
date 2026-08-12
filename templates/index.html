@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guest WiFi</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;background:#f3f5f9;color:#202124}.container{width:100%;max-width:430px;margin:0 auto;padding:60px 20px}.card{background:#fff;padding:34px 26px;border-radius:18px;box-shadow:0 10px 35px rgba(0,0,0,.08)}.logo{text-align:center;font-size:42px;font-weight:700;margin-bottom:15px}h1{text-align:center;font-size:25px;margin:0 0 8px}.subtitle{text-align:center;color:#777;margin-bottom:30px;line-height:1.5}label{display:block;margin:18px 0 8px;font-weight:600}input{width:100%;height:50px;border:1px solid #d8dce5;border-radius:10px;padding:0 14px;font-size:16px;outline:none}input:focus{border-color:#006fff}button{width:100%;height:52px;border:0;border-radius:10px;margin-top:28px;background:#006fff;color:#fff;font-size:17px;font-weight:600;cursor:pointer}.error{background:#fff0f0;color:#c62828;border-radius:8px;padding:11px 12px;margin-bottom:18px;font-size:14px;line-height:1.5}.notice{color:#888;font-size:12px;line-height:1.5;margin-top:22px;text-align:center}
+</style>
+</head>
+<body>
+<div class="container"><div class="card">
+<div class="logo">WiFi</div>
+<h1>Guest WiFi</h1>
+<div class="subtitle">Please enter your information to access the network.</div>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<form method="post">
+<input type="hidden" name="portal_token" value="{{ portal_token }}">
+<label for="access_code">Access Code</label>
+<input id="access_code" type="password" name="access_code" placeholder="Enter WiFi access code" maxlength="64" autocomplete="off" required>
+<label for="name">Name</label>
+<input id="name" type="text" name="name" value="{{ name or '' }}" placeholder="Enter your full name" maxlength="80" autocomplete="name" required>
+<label for="phone">Mobile Number / Passport Number</label>
+<input id="phone" type="text" name="phone" value="{{ phone or '' }}" placeholder="Enter mobile or passport number" maxlength="24" autocomplete="off" required>
+<button type="submit">Connect to WiFi</button>
+</form>
+<div class="notice">Your information is collected only for guest network access management.</div>
+</div></div>
+</body>
+</html>
