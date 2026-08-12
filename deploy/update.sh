@@ -218,13 +218,56 @@ RESOLVED_COMMIT="$(
 
 test "$RESOLVED_COMMIT" != ""
 
-curl -fL --retry 3 \
-    -o "$RELEASE_DIR/release.tar.gz" \
-    "https://github.com/${REPOSITORY}/archive/${RESOLVED_COMMIT}.tar.gz"
+curl -fsSL --retry 3 \
+    --connect-timeout 10 \
+    --max-time 60 \
+    -o "$RELEASE_DIR/tree.json" \
+    "https://api.github.com/repos/${REPOSITORY}/git/trees/${RESOLVED_COMMIT}?recursive=1"
 
-tar -xzf "$RELEASE_DIR/release.tar.gz" \
-    --strip-components=1 \
-    -C "$RELEASE_DIR/source"
+"$APP_DIR/venv/bin/python" \
+    - "$RELEASE_DIR/tree.json" \
+    > "$RELEASE_DIR/manifest.txt" <<'PY'
+import json
+import pathlib
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    tree = json.load(handle)
+
+if tree.get("truncated"):
+    raise SystemExit("GitHub returned a truncated release manifest")
+
+paths = []
+
+for item in tree.get("tree", []):
+    if item.get("type") != "blob":
+        continue
+
+    path = item.get("path", "")
+    parts = pathlib.PurePosixPath(path).parts
+
+    if not path or path.startswith("/") or ".." in parts:
+        raise SystemExit("Unsafe release path returned by GitHub")
+
+    paths.append(path)
+
+if not paths:
+    raise SystemExit("GitHub returned an empty release manifest")
+
+for path in sorted(paths):
+    print(path)
+PY
+
+while IFS= read -r path; do
+    destination="$RELEASE_DIR/source/$path"
+    mkdir -p "$(dirname "$destination")"
+
+    curl -fsSL --retry 3 \
+        --connect-timeout 10 \
+        --max-time 60 \
+        -o "$destination" \
+        "https://raw.githubusercontent.com/${REPOSITORY}/${RESOLVED_COMMIT}/${path}"
+done < "$RELEASE_DIR/manifest.txt"
 
 for item in "${FILES[@]}" tests; do
     test -e "$RELEASE_DIR/source/$item"
