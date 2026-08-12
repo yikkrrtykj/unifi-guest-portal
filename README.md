@@ -11,7 +11,9 @@ This project provides:
 - Automatic guest authorization through the legacy self-hosted UniFi controller API
 - Configurable authorization lifetime
 - Third-party / police guest management dashboard
-- Live dashboard refresh every 3 seconds
+- Server-side dashboard search, status filtering and pagination
+- Portal, database and UniFi controller status checks
+- Staff action history in the dashboard
 - Force re-registration action
 - Staff login and action audit logging
 - SQLite storage
@@ -135,9 +137,15 @@ AUTH_MINUTES=480
 ACCESS_CODE_MAX_FAILURES=5
 ACCESS_CODE_WINDOW_SECONDS=600
 ACCESS_CODE_BLOCK_SECONDS=900
+ADMIN_LOGIN_MAX_FAILURES=5
+ADMIN_LOGIN_WINDOW_SECONDS=600
+ADMIN_LOGIN_BLOCK_SECONDS=900
 STAFF_LOGIN_MAX_FAILURES=5
 STAFF_LOGIN_WINDOW_SECONDS=600
 STAFF_LOGIN_BLOCK_SECONDS=900
+
+# Staff records per page (10-100)
+DASHBOARD_PAGE_SIZE=50
 
 # Leave false while testing with HTTP.
 # Change to true after HTTPS is enabled.
@@ -344,7 +352,32 @@ The dashboard shows:
 - Current portal status
 - Force Re-register action
 
-The page automatically reloads guest data every 3 seconds without a browser refresh.
+The dashboard provides server-side search, status filtering and pagination, and refreshes the current page automatically. It also shows recent staff actions and on-demand portal, database, UniFi controller and browser transport checks.
+
+## Updating an existing server
+
+The repository includes a deployment helper that downloads a specific release, runs automated tests, backs up the application and SQLite database, restarts both services, performs health checks and automatically rolls back if deployment fails.
+
+After a new commit is published, run from the installed repository:
+
+```bash
+cd /opt/unifi-portal
+sudo bash deploy/update.sh COMMIT_SHA
+```
+
+If the existing server was installed by copying files and does not yet contain `deploy/update.sh`, bootstrap the helper once:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/yikkrrtykj/unifi-guest-portal/COMMIT_SHA/deploy/update.sh \
+  -o /tmp/unifi-portal-update.sh
+
+sudo bash /tmp/unifi-portal-update.sh COMMIT_SHA
+```
+
+After that first update, the helper is installed at `/opt/unifi-portal/deploy/update.sh` for future releases.
+
+The script does not close the parent SSH session. Backups are stored under `/opt/unifi-portal-backups`.
 
 ### Force Re-register
 
@@ -434,6 +467,17 @@ Before production, especially when collecting mobile/passport data:
 - restrict `/staff/` to a trusted staff/police network where possible
 - avoid exposing the staff dashboard to the guest VLAN
 
+### When no certificate is available yet
+
+Plain HTTP can remain enabled for isolated internal testing. Keep `STAFF_COOKIE_SECURE=false` until HTTPS is actually enabled.
+
+For production, a certificate requires a stable DNS name. The preferred options are:
+
+1. Use an organization-owned internal DNS name and a certificate issued by the organization's internal certificate authority. Install that authority on managed staff devices.
+2. Use a public DNS name owned by the organization and obtain a publicly trusted certificate through DNS validation. This can work even when the portal server itself is not exposed to the public Internet.
+
+A self-signed certificate encrypts traffic but produces browser and captive-portal trust warnings unless its issuing authority is installed on every device. It is therefore not suitable for unmanaged guest devices.
+
 ## 12. Service logs
 
 Guest portal:
@@ -472,6 +516,7 @@ journalctl -u nginx -f
 │   └── staff_login.html
 ├── deploy/
 │   ├── nginx.conf
+│   ├── update.sh
 │   ├── unifi-portal.service
 │   └── unifi-portal-staff.service
 ├── .env.example

@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import math
 import sqlite3
 import secrets
 from datetime import datetime, timezone, timedelta
@@ -25,6 +26,7 @@ from itsdangerous import (
 
 from rate_limit import (
     clear_failures,
+    ensure_rate_limit_table,
     rate_limit_key,
     record_failure,
     retry_after,
@@ -110,6 +112,13 @@ STAFF_LOGIN_BLOCK_SECONDS = int(
     )
 )
 
+DASHBOARD_PAGE_SIZE = int(
+    os.environ.get(
+        "DASHBOARD_PAGE_SIZE",
+        "50"
+    )
+)
+
 
 if not STAFF_USER.strip():
     raise RuntimeError(
@@ -134,6 +143,12 @@ if (
     raise RuntimeError(
         "Staff login rate-limit values "
         "must be positive integers"
+    )
+
+if not 10 <= DASHBOARD_PAGE_SIZE <= 100:
+    raise RuntimeError(
+        "DASHBOARD_PAGE_SIZE must be "
+        "between 10 and 100"
     )
 
 
@@ -267,6 +282,30 @@ def init_db():
                 result TEXT,
                 created_at TEXT NOT NULL
             )
+        """)
+
+        ensure_rate_limit_table(conn)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS
+                idx_guests_created_at
+            ON guests (created_at DESC)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS
+                idx_guests_status_fields
+            ON guests (
+                authorized,
+                revoked_at,
+                expires_at
+            )
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS
+                idx_staff_actions_created_at
+            ON staff_actions (created_at DESC)
         """)
 
         conn.commit()
@@ -587,6 +626,83 @@ def serialize_guest(row):
     }
 
 
+def positive_int(value, default, maximum=None):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+
+    if number < 1:
+        return default
+
+    if maximum is not None:
+        return min(number, maximum)
+
+    return number
+
+
+def guest_filter(query, status):
+    clauses = []
+    parameters = []
+
+    if query:
+        like = f"%{query}%"
+        clauses.append(
+            "(name LIKE ? OR phone LIKE ? OR ssid LIKE ?)"
+        )
+        parameters.extend((like, like, like))
+
+    now = utcnow().isoformat()
+
+    if status == "active":
+        clauses.append("""
+            authorized = 1
+            AND registration_state = 'complete'
+            AND revoked_at IS NULL
+            AND expires_at IS NOT NULL
+            AND expires_at > ?
+        """)
+        parameters.append(now)
+
+    elif status == "revoked":
+        clauses.append("revoked_at IS NOT NULL")
+
+    elif status == "expired":
+        clauses.append("""
+            revoked_at IS NULL
+            AND NOT (
+                authorized = 1
+                AND registration_state = 'complete'
+                AND expires_at IS NOT NULL
+                AND expires_at > ?
+            )
+        """)
+        parameters.append(now)
+
+    where = (
+        " WHERE " + " AND ".join(
+            f"({clause})"
+            for clause in clauses
+        )
+        if clauses
+        else ""
+    )
+
+    return where, parameters
+
+
+def serialize_action(row):
+    return {
+        "id": row["id"],
+        "guest_id": row["guest_id"],
+        "action": row["action"] or "",
+        "actor": row["actor"] or "",
+        "client_mac": row["client_mac"] or "",
+        "result": row["result"] or "",
+        "created_at": row["created_at"] or "",
+    }
+
+
 @app.after_request
 def security_headers(response):
     response.headers[
@@ -604,6 +720,10 @@ def security_headers(response):
     response.headers[
         "X-Content-Type-Options"
     ] = "nosniff"
+
+    response.headers[
+        "Referrer-Policy"
+    ] = "same-origin"
 
     return response
 
@@ -767,14 +887,76 @@ def api_guests():
             "error": "Not authenticated"
         }), 401
 
+    page = positive_int(
+        request.args.get("page"),
+        1,
+        1000000
+    )
+    page_size = positive_int(
+        request.args.get("page_size"),
+        DASHBOARD_PAGE_SIZE,
+        100
+    )
+    query = (
+        request.args.get("q", "")
+        .strip()[:100]
+    )
+    status = (
+        request.args.get("status", "all")
+        .strip().lower()
+    )
+
+    if status not in {
+        "all",
+        "active",
+        "expired",
+        "revoked",
+    }:
+        status = "all"
+
+    where, parameters = guest_filter(
+        query,
+        status
+    )
+
     conn = get_db()
 
-    rows = conn.execute("""
-        SELECT *
+    filtered_total = conn.execute(
+        "SELECT COUNT(*) FROM guests" + where,
+        parameters
+    ).fetchone()[0]
+
+    pages = max(
+        1,
+        math.ceil(filtered_total / page_size)
+    )
+    page = min(page, pages)
+    offset = (page - 1) * page_size
+
+    rows = conn.execute(
+        "SELECT * FROM guests"
+        + where
+        + " ORDER BY id DESC LIMIT ? OFFSET ?",
+        (*parameters, page_size, offset)
+    ).fetchall()
+
+    now = utcnow().isoformat()
+    totals = conn.execute("""
+        SELECT
+            COUNT(*) AS total,
+            COALESCE(SUM(
+                CASE
+                    WHEN authorized = 1
+                     AND registration_state = 'complete'
+                     AND revoked_at IS NULL
+                     AND expires_at IS NOT NULL
+                     AND expires_at > ?
+                    THEN 1
+                    ELSE 0
+                END
+            ), 0) AS active
         FROM guests
-        ORDER BY id DESC
-        LIMIT 500
-    """).fetchall()
+    """, (now,)).fetchone()
 
     conn.close()
 
@@ -786,12 +968,109 @@ def api_guests():
     return jsonify({
         "ok": True,
         "guests": guests,
-        "total": len(guests),
-        "active": sum(
-            1
-            for guest in guests
-            if guest["status"] == "active"
+        "total": totals["total"],
+        "active": totals["active"],
+        "filtered_total": filtered_total,
+        "page": page,
+        "pages": pages,
+        "page_size": page_size,
+    })
+
+
+@app.route(
+    "/staff/api/actions",
+    methods=["GET"]
+)
+def api_actions():
+    if not logged_in():
+        return jsonify({
+            "ok": False,
+            "error": "Not authenticated"
+        }), 401
+
+    page = positive_int(
+        request.args.get("page"),
+        1,
+        1000000
+    )
+    page_size = positive_int(
+        request.args.get("page_size"),
+        25,
+        100
+    )
+
+    conn = get_db()
+    total = conn.execute(
+        "SELECT COUNT(*) FROM staff_actions"
+    ).fetchone()[0]
+    pages = max(1, math.ceil(total / page_size))
+    page = min(page, pages)
+
+    rows = conn.execute("""
+        SELECT *
+        FROM staff_actions
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+    """, (
+        page_size,
+        (page - 1) * page_size
+    )).fetchall()
+    conn.close()
+
+    return jsonify({
+        "ok": True,
+        "actions": [
+            serialize_action(row)
+            for row in rows
+        ],
+        "total": total,
+        "page": page,
+        "pages": pages,
+    })
+
+
+@app.route(
+    "/staff/api/status",
+    methods=["GET"]
+)
+def api_status():
+    if not logged_in():
+        return jsonify({
+            "ok": False,
+            "error": "Not authenticated"
+        }), 401
+
+    database_ok = False
+
+    try:
+        conn = get_db()
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+        database_ok = True
+    except sqlite3.Error:
+        app.logger.exception(
+            "DASHBOARD_DATABASE_STATUS_FAILED"
         )
+
+    unifi, error = unifi_login()
+    unifi_ok = unifi is not None
+
+    if unifi:
+        unifi.close()
+
+    return jsonify({
+        "ok": True,
+        "portal": True,
+        "database": database_ok,
+        "unifi": unifi_ok,
+        "unifi_error": "" if unifi_ok else error,
+        "transport": (
+            request.headers.get(
+                "X-Forwarded-Proto",
+                request.scheme
+            )
+        ),
+        "checked_at": utcnow().isoformat(),
     })
 
 

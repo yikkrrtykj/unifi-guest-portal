@@ -1,4 +1,5 @@
 import importlib
+import base64
 import os
 import sqlite3
 import sys
@@ -82,6 +83,7 @@ class SecurityTests(unittest.TestCase):
             """
         )
         conn.execute("DELETE FROM auth_rate_limits")
+        conn.execute("DELETE FROM staff_actions")
         conn.commit()
         conn.close()
 
@@ -356,6 +358,240 @@ class SecurityTests(unittest.TestCase):
 
         self.assertIn("guests", tables)
         self.assertIn("staff_actions", tables)
+        self.assertIn("auth_rate_limits", tables)
+
+    def test_admin_basic_auth_is_rate_limited(self):
+        client = self.portal.app.test_client()
+        credentials = base64.b64encode(
+            b"admin:wrong-password"
+        ).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {credentials}"
+        }
+
+        for _ in range(4):
+            response = client.get(
+                "/admin",
+                headers=headers,
+                environ_base={
+                    "REMOTE_ADDR": "192.0.2.30",
+                },
+            )
+            self.assertEqual(response.status_code, 401)
+
+        response = client.get(
+            "/admin",
+            headers=headers,
+            environ_base={
+                "REMOTE_ADDR": "192.0.2.30",
+            },
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertGreater(
+            int(response.headers["Retry-After"]),
+            0,
+        )
+
+    def test_guest_responses_include_security_headers(self):
+        response = self.portal.app.test_client().get(
+            "/health"
+        )
+
+        self.assertEqual(
+            response.headers["Cache-Control"],
+            "no-store",
+        )
+        self.assertEqual(
+            response.headers["X-Frame-Options"],
+            "DENY",
+        )
+        self.assertEqual(
+            response.headers["X-Content-Type-Options"],
+            "nosniff",
+        )
+
+    def test_redirect_and_unifi_fields_are_bounded(self):
+        self.assertEqual(
+            self.portal.safe_site("../invalid"),
+            self.portal.UNIFI_SITE,
+        )
+        self.assertEqual(
+            len(self.portal.safe_ssid("x" * 500)),
+            self.portal.MAX_SSID_LENGTH,
+        )
+        self.assertIsNone(
+            self.portal.safe_redirect_url(
+                "https://example.test/" + "x" * 3000
+            )
+        )
+        self.assertEqual(
+            self.portal.safe_optional_mac("not-a-mac"),
+            "",
+        )
+
+    def test_duplicate_pending_registration_is_rejected(self):
+        mac = "02:00:00:00:00:41"
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            """
+                INSERT INTO guests (
+                    name,
+                    phone,
+                    client_mac,
+                    created_at,
+                    authorized,
+                    registration_state
+                )
+                VALUES (?, ?, ?, ?, 0, 'pending')
+            """,
+            (
+                "Pending Guest",
+                "P1234567",
+                mac,
+                self.portal.utcnow().isoformat(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        with mock.patch.object(
+            self.portal,
+            "authorize_guest",
+        ) as authorize:
+            response = self.portal_post(
+                mac,
+                "correct-code",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        authorize.assert_not_called()
+
+    def test_staff_guest_api_uses_server_side_pagination(self):
+        now = self.portal.utcnow().isoformat()
+        conn = sqlite3.connect(self.db_path)
+
+        for index in range(25):
+            conn.execute(
+                """
+                    INSERT INTO guests (
+                        name,
+                        phone,
+                        ssid,
+                        created_at,
+                        authorized,
+                        registration_state
+                    )
+                    VALUES (?, ?, ?, ?, 0, 'complete')
+                """,
+                (
+                    f"Paged Guest {index:02d}",
+                    f"P12345{index:02d}",
+                    "Guest WiFi",
+                    now,
+                ),
+            )
+
+        conn.commit()
+        conn.close()
+
+        client = self.staff.app.test_client()
+
+        with client.session_transaction() as session:
+            session["staff_user"] = "staff"
+
+        response = client.get(
+            "/staff/api/guests?page=2&page_size=10&q=Paged"
+        )
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["filtered_total"], 25)
+        self.assertEqual(data["page"], 2)
+        self.assertEqual(data["pages"], 3)
+        self.assertEqual(len(data["guests"]), 10)
+
+    def test_staff_dashboard_exposes_status_and_audit_sections(self):
+        client = self.staff.app.test_client()
+
+        with client.session_transaction() as session:
+            session["staff_user"] = "staff"
+
+        response = client.get("/staff/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"System Status", response.data)
+        self.assertIn(b"Recent Staff Actions", response.data)
+
+    def test_staff_actions_api_returns_audit_records(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            """
+                INSERT INTO staff_actions (
+                    guest_id,
+                    action,
+                    actor,
+                    client_mac,
+                    result,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                7,
+                "force-reregister",
+                "staff",
+                "02:00:00:00:00:51",
+                "Access revoked.",
+                self.portal.utcnow().isoformat(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        client = self.staff.app.test_client()
+
+        with client.session_transaction() as session:
+            session["staff_user"] = "staff"
+
+        response = client.get("/staff/api/actions")
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(
+            data["actions"][0]["actor"],
+            "staff",
+        )
+
+    def test_staff_status_api_checks_database_and_unifi(self):
+        client = self.staff.app.test_client()
+
+        with client.session_transaction() as session:
+            session["staff_user"] = "staff"
+
+        unifi = mock.Mock()
+
+        with mock.patch.object(
+            self.staff,
+            "unifi_login",
+            return_value=(unifi, None),
+        ):
+            response = client.get(
+                "/staff/api/status",
+                headers={
+                    "X-Forwarded-Proto": "https",
+                },
+            )
+
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(data["database"])
+        self.assertTrue(data["unifi"])
+        self.assertEqual(data["transport"], "https")
+        unifi.close.assert_called_once_with()
 
     def test_failed_authorization_removes_pending_record(self):
         mac = "02:00:00:00:00:22"

@@ -23,6 +23,7 @@ from itsdangerous import (
 
 from rate_limit import (
     clear_failures,
+    ensure_rate_limit_table,
     rate_limit_key,
     record_failure,
     retry_after,
@@ -101,6 +102,28 @@ ACCESS_CODE_BLOCK_SECONDS = int(
         "900"
     )
 )
+
+ADMIN_LOGIN_MAX_FAILURES = int(
+    os.environ.get(
+        "ADMIN_LOGIN_MAX_FAILURES",
+        "5"
+    )
+)
+
+ADMIN_LOGIN_WINDOW_SECONDS = int(
+    os.environ.get(
+        "ADMIN_LOGIN_WINDOW_SECONDS",
+        "600"
+    )
+)
+
+ADMIN_LOGIN_BLOCK_SECONDS = int(
+    os.environ.get(
+        "ADMIN_LOGIN_BLOCK_SECONDS",
+        "900"
+    )
+)
+
 PORTAL_ACCESS_CODE = os.environ.get(
     "PORTAL_ACCESS_CODE",
     ""
@@ -134,9 +157,12 @@ if (
     ACCESS_CODE_MAX_FAILURES < 1
     or ACCESS_CODE_WINDOW_SECONDS < 1
     or ACCESS_CODE_BLOCK_SECONDS < 1
+    or ADMIN_LOGIN_MAX_FAILURES < 1
+    or ADMIN_LOGIN_WINDOW_SECONDS < 1
+    or ADMIN_LOGIN_BLOCK_SECONDS < 1
 ):
     raise RuntimeError(
-        "Access code rate-limit values "
+        "Authentication rate-limit values "
         "must be positive integers"
     )
 
@@ -155,6 +181,24 @@ MAC_RE = re.compile(
     r"[0-9a-fA-F]{2}:"
     r"[0-9a-fA-F]{2}$"
 )
+
+SITE_RE = re.compile(
+    r"^[A-Za-z0-9_-]{1,64}$"
+)
+
+MAX_SSID_LENGTH = 128
+MAX_REDIRECT_URL_LENGTH = 2048
+PENDING_REGISTRATION_SECONDS = 300
+
+
+class RegistrationInProgress(Exception):
+    pass
+
+
+class RegistrationAlreadyComplete(Exception):
+    def __init__(self, name):
+        super().__init__(name)
+        self.name = name
 
 
 def utcnow():
@@ -234,6 +278,18 @@ def init_db():
                     ADD COLUMN {column} {definition}
                     """
                 )
+
+        ensure_rate_limit_table(conn)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS
+                idx_guests_client_state
+            ON guests (
+                client_mac,
+                registration_state,
+                created_at
+            )
+        """)
 
         conn.commit()
 
@@ -353,6 +409,9 @@ def safe_redirect_url(value):
     if not value:
         return None
 
+    if len(value) > MAX_REDIRECT_URL_LENGTH:
+        return None
+
     try:
         parsed = urlparse(value)
 
@@ -366,6 +425,33 @@ def safe_redirect_url(value):
         pass
 
     return None
+
+
+def safe_site(value):
+    value = (value or "").strip()
+
+    if SITE_RE.fullmatch(value):
+        return value
+
+    return UNIFI_SITE
+
+
+def safe_ssid(value):
+    value = (value or "").strip()
+
+    return value[:MAX_SSID_LENGTH]
+
+
+def safe_optional_mac(value):
+    value = (value or "").strip().lower()
+
+    if not value:
+        return ""
+
+    if MAC_RE.fullmatch(value):
+        return value
+
+    return ""
 
 
 def authorize_guest(
@@ -548,6 +634,50 @@ def clear_access_code_failures(client_mac):
     )
 
 
+def admin_login_limit_keys(username):
+    return (
+        rate_limit_key(
+            PORTAL_SECRET,
+            "admin-ip",
+            client_ip()
+        ),
+        rate_limit_key(
+            PORTAL_SECRET,
+            "admin-user",
+            username or "empty"
+        ),
+    )
+
+
+def admin_login_retry_after(username):
+    return retry_after(
+        DB_PATH,
+        admin_login_limit_keys(username)
+    )
+
+
+def record_admin_login_failure(username):
+    waits = [
+        record_failure(
+            DB_PATH,
+            key,
+            ADMIN_LOGIN_MAX_FAILURES,
+            ADMIN_LOGIN_WINDOW_SECONDS,
+            ADMIN_LOGIN_BLOCK_SECONDS,
+        )
+        for key in admin_login_limit_keys(username)
+    ]
+
+    return max(waits)
+
+
+def clear_admin_login_failures(username):
+    clear_failures(
+        DB_PATH,
+        admin_login_limit_keys(username)
+    )
+
+
 def get_active_guest(mac):
     conn = get_db()
 
@@ -624,6 +754,8 @@ def portal_success(
 
 
 def handle_portal(site):
+    site = safe_site(site)
+
     if request.method in (
         "GET",
         "HEAD"
@@ -635,24 +767,21 @@ def handle_portal(site):
             .lower()
         )
 
-        ap_mac = (
+        ap_mac = safe_optional_mac(
             request.args
             .get("ap", "")
-            .strip()
-            .lower()
         )
 
-        ssid = (
+        ssid = safe_ssid(
             request.args
             .get("ssid", "")
-            .strip()
         )
 
-        original_url = (
+        original_url = safe_redirect_url(
             request.args
             .get("url", "")
             .strip()
-        )
+        ) or ""
 
         if not MAC_RE.fullmatch(
             client_mac
@@ -745,30 +874,26 @@ def handle_portal(site):
         .lower()
     )
 
-    ap_mac = (
+    ap_mac = safe_optional_mac(
         payload
         .get("ap", "")
-        .strip()
-        .lower()
     )
 
-    ssid = (
+    ssid = safe_ssid(
         payload
         .get("ssid", "")
-        .strip()
     )
 
-    site = (
+    site = safe_site(
         payload
         .get("site", UNIFI_SITE)
-        .strip()
     )
 
-    original_url = (
+    original_url = safe_redirect_url(
         payload
         .get("url", "")
         .strip()
-    )
+    ) or ""
 
     if not MAC_RE.fullmatch(
         client_mac
@@ -920,11 +1045,68 @@ def handle_portal(site):
             minutes=AUTH_MINUTES
         )
     )
-
     conn = None
 
     try:
         conn = get_db()
+
+        conn.execute("BEGIN IMMEDIATE")
+
+        pending_cutoff = (
+            now
+            - timedelta(
+                seconds=PENDING_REGISTRATION_SECONDS
+            )
+        ).isoformat()
+
+        existing_pending = conn.execute("""
+            SELECT id
+            FROM guests
+            WHERE client_mac = ?
+              AND registration_state = 'pending'
+              AND created_at >= ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (
+            client_mac,
+            pending_cutoff
+        )).fetchone()
+
+        if existing_pending:
+            raise RegistrationInProgress()
+
+        existing_active = conn.execute("""
+            SELECT name
+            FROM guests
+            WHERE client_mac = ?
+              AND authorized = 1
+              AND registration_state = 'complete'
+              AND expires_at IS NOT NULL
+              AND expires_at > ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (
+            client_mac,
+            now.isoformat()
+        )).fetchone()
+
+        if existing_active:
+            raise RegistrationAlreadyComplete(
+                existing_active["name"]
+            )
+
+        conn.execute("""
+            UPDATE guests
+            SET registration_state = 'failed',
+                auth_error = ?
+            WHERE client_mac = ?
+              AND registration_state = 'pending'
+              AND created_at < ?
+        """, (
+            "Registration timed out before completion",
+            client_mac,
+            pending_cutoff
+        ))
 
         cursor = conn.execute("""
             INSERT INTO guests (
@@ -961,6 +1143,32 @@ def handle_portal(site):
 
         guest_id = cursor.lastrowid
         conn.commit()
+
+    except RegistrationAlreadyComplete as exc:
+        if conn:
+            conn.rollback()
+
+        return portal_success(
+            exc.name,
+            safe_redirect_url(original_url),
+            returning=True
+        )
+
+    except RegistrationInProgress:
+        if conn:
+            conn.rollback()
+
+        return render_template(
+            "index.html",
+            portal_token=token,
+            name=name,
+            phone=phone,
+            error=(
+                "A registration for this device "
+                "is already in progress. Please "
+                "wait a moment and try again."
+            )
+        ), 409
 
     except sqlite3.Error:
         if conn:
@@ -1162,6 +1370,31 @@ def root():
     )
 
 
+@app.after_request
+def security_headers(response):
+    response.headers[
+        "Cache-Control"
+    ] = "no-store"
+
+    response.headers[
+        "Pragma"
+    ] = "no-cache"
+
+    response.headers[
+        "X-Frame-Options"
+    ] = "DENY"
+
+    response.headers[
+        "X-Content-Type-Options"
+    ] = "nosniff"
+
+    response.headers[
+        "Referrer-Policy"
+    ] = "same-origin"
+
+    return response
+
+
 @app.route("/health")
 def health():
     return {
@@ -1171,8 +1404,45 @@ def health():
 
 @app.route("/admin")
 def admin():
+    auth = request.authorization
+    username = (
+        auth.username
+        if auth
+        else ""
+    )
+
+    wait_seconds = admin_login_retry_after(
+        username
+    )
+
+    if wait_seconds:
+        return Response(
+            "Too many authentication attempts. "
+            "Please wait before trying again.",
+            429,
+            {
+                "Retry-After": str(wait_seconds)
+            }
+        )
+
     if not check_admin():
+        wait_seconds = record_admin_login_failure(
+            username
+        )
+
+        if wait_seconds:
+            return Response(
+                "Too many authentication attempts. "
+                "Please wait before trying again.",
+                429,
+                {
+                    "Retry-After": str(wait_seconds)
+                }
+            )
+
         return unauthorized()
+
+    clear_admin_login_failures(username)
 
     conn = get_db()
 

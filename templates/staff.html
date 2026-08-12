@@ -112,6 +112,13 @@ body {
     margin-bottom: 16px;
 }
 
+.filters {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+}
+
 .search {
     width: 370px;
     max-width: 100%;
@@ -128,6 +135,16 @@ body {
     border-color: #006fff;
 }
 
+.select {
+    height: 44px;
+    border: 1px solid #d5d9df;
+    border-radius: 10px;
+    padding: 0 36px 0 12px;
+    background: white;
+    color: #333;
+    font-size: 14px;
+}
+
 .refresh-status {
     color: #888;
     font-size: 13px;
@@ -139,6 +156,93 @@ body {
     border-radius: 15px;
     box-shadow:
         0 4px 20px rgba(0,0,0,.055);
+}
+
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin: 14px 0 28px;
+    color: #666;
+    font-size: 13px;
+}
+
+.page-btn,
+.secondary-btn {
+    border: 1px solid #d8dce5;
+    background: white;
+    color: #333;
+    min-height: 38px;
+    padding: 0 14px;
+    border-radius: 9px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.page-btn:disabled {
+    opacity: .45;
+    cursor: default;
+}
+
+.section {
+    margin-top: 28px;
+}
+
+.section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 13px;
+}
+
+.section-head h2 {
+    margin: 0;
+    font-size: 20px;
+}
+
+.section-head p {
+    margin: 5px 0 0;
+    color: #777;
+    font-size: 13px;
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(130px, 1fr));
+    gap: 12px;
+}
+
+.service-card {
+    background: white;
+    border-radius: 13px;
+    padding: 16px;
+    box-shadow: 0 3px 14px rgba(0,0,0,.05);
+}
+
+.service-name {
+    color: #777;
+    font-size: 12px;
+    margin-bottom: 7px;
+}
+
+.service-value {
+    font-weight: 700;
+}
+
+.service-value.ok {
+    color: #176b37;
+}
+
+.service-value.bad {
+    color: #b42318;
+}
+
+.audit-result {
+    max-width: 520px;
+    white-space: normal;
+    line-height: 1.45;
 }
 
 table {
@@ -380,12 +484,21 @@ td {
         display: block;
     }
 
+    .filters {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
     .search {
         width: 100%;
     }
 
     .refresh-status {
         margin-top: 10px;
+    }
+
+    .status-grid {
+        grid-template-columns: 1fr 1fr;
     }
 }
 
@@ -472,12 +585,26 @@ td {
 
     <div class="toolbar">
 
-        <input
-            id="search"
-            class="search"
-            type="search"
-            placeholder="Search name or mobile / passport..."
-        >
+        <div class="filters">
+
+            <input
+                id="search"
+                class="search"
+                type="search"
+                placeholder="Search name, number or SSID..."
+            >
+
+            <select
+                id="statusFilter"
+                class="select"
+            >
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="expired">Expired</option>
+                <option value="revoked">Revoked</option>
+            </select>
+
+        </div>
 
         <div
             id="refreshStatus"
@@ -523,6 +650,90 @@ td {
         </table>
 
     </div>
+
+    <div class="pagination">
+        <button
+            id="previousPage"
+            class="page-btn"
+            type="button"
+        >Previous</button>
+
+        <span id="pageStatus">Page 1 of 1</span>
+
+        <button
+            id="nextPage"
+            class="page-btn"
+            type="button"
+        >Next</button>
+    </div>
+
+
+    <section class="section">
+
+        <div class="section-head">
+            <div>
+                <h2>System Status</h2>
+                <p>Live checks for this portal environment.</p>
+            </div>
+
+            <button
+                id="checkStatus"
+                class="secondary-btn"
+                type="button"
+            >Check now</button>
+        </div>
+
+        <div class="status-grid">
+            <div class="service-card">
+                <div class="service-name">Portal</div>
+                <div id="portalStatus" class="service-value">Not checked</div>
+            </div>
+            <div class="service-card">
+                <div class="service-name">Database</div>
+                <div id="databaseStatus" class="service-value">Not checked</div>
+            </div>
+            <div class="service-card">
+                <div class="service-name">UniFi Controller</div>
+                <div id="unifiStatus" class="service-value">Not checked</div>
+            </div>
+            <div class="service-card">
+                <div class="service-name">Browser Transport</div>
+                <div id="transportStatus" class="service-value">Not checked</div>
+            </div>
+        </div>
+
+    </section>
+
+
+    <section class="section">
+
+        <div class="section-head">
+            <div>
+                <h2>Recent Staff Actions</h2>
+                <p>Most recent force re-registration results.</p>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Client MAC</th>
+                    <th>Result</th>
+                </tr>
+                </thead>
+                <tbody id="actionRows">
+                <tr>
+                    <td colspan="5" class="empty">Loading actions…</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </section>
 
 </div>
 
@@ -592,12 +803,30 @@ const csrfToken =
 let guests = [];
 let selectedGuest = null;
 let loading = false;
+let currentPage = 1;
+let totalPages = 1;
+let searchTimer = null;
 
 const guestRows =
     document.getElementById("guestRows");
 
 const searchInput =
     document.getElementById("search");
+
+const statusFilter =
+    document.getElementById("statusFilter");
+
+const previousPage =
+    document.getElementById("previousPage");
+
+const nextPage =
+    document.getElementById("nextPage");
+
+const pageStatus =
+    document.getElementById("pageStatus");
+
+const actionRows =
+    document.getElementById("actionRows");
 
 const modalBackdrop =
     document.getElementById("modalBackdrop");
@@ -676,29 +905,7 @@ function statusHtml(status) {
 
 function renderGuests() {
 
-    const query =
-        searchInput.value
-            .trim()
-            .toLowerCase();
-
-    const filtered =
-        guests.filter(
-            guest => {
-
-                const text = (
-                    guest.name
-                    + " "
-                    + guest.phone
-                    + " "
-                    + guest.ssid
-                ).toLowerCase();
-
-                return text.includes(query);
-            }
-        );
-
-
-    if (filtered.length === 0) {
+    if (guests.length === 0) {
 
         guestRows.innerHTML = `
             <tr>
@@ -716,7 +923,7 @@ function renderGuests() {
 
 
     guestRows.innerHTML =
-        filtered.map(
+        guests.map(
             guest => {
 
                 const action =
@@ -812,9 +1019,17 @@ async function loadGuests() {
 
     try {
 
+        const parameters =
+            new URLSearchParams({
+                page: String(currentPage),
+                q: searchInput.value.trim(),
+                status: statusFilter.value
+            });
+
         const response =
             await fetch(
-                "/staff/api/guests",
+                "/staff/api/guests?"
+                + parameters.toString(),
                 {
                     cache: "no-store"
                 }
@@ -841,6 +1056,9 @@ async function loadGuests() {
         guests =
             data.guests || [];
 
+        currentPage = data.page || 1;
+        totalPages = data.pages || 1;
+
         document
             .getElementById("totalCount")
             .textContent =
@@ -858,6 +1076,21 @@ async function loadGuests() {
                 + new Date()
                     .toLocaleTimeString();
 
+        pageStatus.textContent =
+            "Page "
+            + currentPage
+            + " of "
+            + totalPages
+            + " · "
+            + data.filtered_total
+            + " matching";
+
+        previousPage.disabled =
+            currentPage <= 1;
+
+        nextPage.disabled =
+            currentPage >= totalPages;
+
         renderGuests();
 
     }
@@ -874,6 +1107,123 @@ async function loadGuests() {
     finally {
 
         loading = false;
+    }
+}
+
+
+async function loadActions() {
+
+    try {
+        const response = await fetch(
+            "/staff/api/actions?page_size=20",
+            {cache: "no-store"}
+        );
+
+        if (response.status === 401) {
+            window.location = "/staff/login";
+            return;
+        }
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            throw new Error("Unable to load actions.");
+        }
+
+        const actions = data.actions || [];
+
+        if (actions.length === 0) {
+            actionRows.innerHTML = `
+                <tr>
+                    <td colspan="5" class="empty">
+                        No staff actions recorded.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        actionRows.innerHTML = actions.map(
+            action => `
+                <tr>
+                    <td>${escapeHtml(formatTime(action.created_at))}</td>
+                    <td>${escapeHtml(action.actor)}</td>
+                    <td>${escapeHtml(action.action)}</td>
+                    <td>${escapeHtml(action.client_mac || "—")}</td>
+                    <td class="audit-result">${escapeHtml(action.result || "—")}</td>
+                </tr>
+            `
+        ).join("");
+
+    } catch (error) {
+        actionRows.innerHTML = `
+            <tr>
+                <td colspan="5" class="empty">
+                    Unable to load staff actions.
+                </td>
+            </tr>
+        `;
+    }
+}
+
+
+function setServiceStatus(elementId, ok, text) {
+    const element = document.getElementById(elementId);
+    element.textContent = text;
+    element.className =
+        "service-value " + (ok ? "ok" : "bad");
+}
+
+
+async function loadSystemStatus() {
+    const button = document.getElementById("checkStatus");
+    button.disabled = true;
+    button.textContent = "Checking…";
+
+    try {
+        const response = await fetch(
+            "/staff/api/status",
+            {cache: "no-store"}
+        );
+
+        if (response.status === 401) {
+            window.location = "/staff/login";
+            return;
+        }
+
+        const data = await response.json();
+
+        setServiceStatus(
+            "portalStatus",
+            data.portal,
+            data.portal ? "Available" : "Unavailable"
+        );
+        setServiceStatus(
+            "databaseStatus",
+            data.database,
+            data.database ? "Available" : "Unavailable"
+        );
+        setServiceStatus(
+            "unifiStatus",
+            data.unifi,
+            data.unifi ? "Connected" : "Connection failed"
+        );
+
+        const isHttps = data.transport === "https";
+        setServiceStatus(
+            "transportStatus",
+            isHttps,
+            isHttps ? "HTTPS" : "HTTP (internal testing)"
+        );
+
+    } catch (error) {
+        setServiceStatus("portalStatus", false, "Check failed");
+        setServiceStatus("databaseStatus", false, "Check failed");
+        setServiceStatus("unifiStatus", false, "Check failed");
+        setServiceStatus("transportStatus", false, "Check failed");
+    } finally {
+        button.disabled = false;
+        button.textContent = "Check now";
     }
 }
 
@@ -1024,8 +1374,56 @@ async function revokeSelectedGuest() {
 
 searchInput.addEventListener(
     "input",
-    renderGuests
+    () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(
+            () => {
+                currentPage = 1;
+                loadGuests();
+            },
+            300
+        );
+    }
 );
+
+
+statusFilter.addEventListener(
+    "change",
+    () => {
+        currentPage = 1;
+        loadGuests();
+    }
+);
+
+
+previousPage.addEventListener(
+    "click",
+    () => {
+        if (currentPage > 1) {
+            currentPage -= 1;
+            loadGuests();
+        }
+    }
+);
+
+
+nextPage.addEventListener(
+    "click",
+    () => {
+        if (currentPage < totalPages) {
+            currentPage += 1;
+            loadGuests();
+        }
+    }
+);
+
+
+document
+    .getElementById("checkStatus")
+    .addEventListener(
+        "click",
+        loadSystemStatus
+    );
 
 
 cancelButton.addEventListener(
@@ -1068,10 +1466,17 @@ document.addEventListener(
 
 
 loadGuests();
+loadActions();
+loadSystemStatus();
 
 setInterval(
     loadGuests,
-    3000
+    10000
+);
+
+setInterval(
+    loadActions,
+    30000
 );
 
 </script>
