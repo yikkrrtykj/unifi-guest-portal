@@ -1,0 +1,505 @@
+import os
+import re
+import math
+import sqlite3
+import secrets
+from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse
+
+import requests
+
+from flask import Flask, request, render_template, Response
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+
+
+app = Flask(__name__)
+
+DB_PATH = "/opt/unifi-portal/portal.db"
+
+ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "CHANGE_THIS_PASSWORD")
+
+UNIFI_URL = os.environ.get(
+    "UNIFI_URL",
+    "https://192.168.16.200:8443"
+).rstrip("/")
+
+UNIFI_SITE = os.environ.get("UNIFI_SITE", "default")
+UNIFI_USERNAME = os.environ.get("UNIFI_USERNAME", "")
+UNIFI_PASSWORD = os.environ.get("UNIFI_PASSWORD", "")
+UNIFI_VERIFY_TLS = os.environ.get("UNIFI_VERIFY_TLS", "false").lower() == "true"
+AUTH_MINUTES = int(os.environ.get("AUTH_MINUTES", "480"))
+PORTAL_ACCESS_CODE = os.environ.get("PORTAL_ACCESS_CODE", "")
+PORTAL_SECRET = os.environ.get("PORTAL_SECRET", "")
+
+if not PORTAL_ACCESS_CODE:
+    raise RuntimeError("PORTAL_ACCESS_CODE is not configured")
+
+if not PORTAL_SECRET:
+    raise RuntimeError("PORTAL_SECRET is not configured")
+
+serializer = URLSafeTimedSerializer(PORTAL_SECRET, salt="unifi-guest-portal")
+
+MAC_RE = re.compile(
+    r"^[0-9a-fA-F]{2}:"
+    r"[0-9a-fA-F]{2}:"
+    r"[0-9a-fA-F]{2}:"
+    r"[0-9a-fA-F]{2}:"
+    r"[0-9a-fA-F]{2}:"
+    r"[0-9a-fA-F]{2}$"
+)
+
+if not UNIFI_VERIFY_TLS:
+    requests.packages.urllib3.disable_warnings()
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS guests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            client_mac TEXT,
+            ap_mac TEXT,
+            ssid TEXT,
+            site TEXT,
+            original_url TEXT,
+            remote_ip TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(guests)").fetchall()
+    }
+
+    migrations = {
+        "authorized": "INTEGER NOT NULL DEFAULT 0",
+        "authorized_at": "TEXT",
+        "expires_at": "TEXT",
+        "auth_error": "TEXT",
+        "revoked_at": "TEXT",
+        "revoked_by": "TEXT",
+    }
+
+    for column, definition in migrations.items():
+        if column not in columns:
+            conn.execute(f"ALTER TABLE guests ADD COLUMN {column} {definition}")
+
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+def check_admin():
+    auth = request.authorization
+
+    if not auth:
+        return False
+
+    return (
+        secrets.compare_digest(auth.username or "", ADMIN_USER)
+        and secrets.compare_digest(auth.password or "", ADMIN_PASSWORD)
+    )
+
+
+def unauthorized():
+    return Response(
+        "Authentication required",
+        401,
+        {"WWW-Authenticate": 'Basic realm="Guest WiFi Admin"'}
+    )
+
+
+def valid_name(name):
+    if len(name) < 2 or len(name) > 80:
+        return False
+
+    if not any(char.isalpha() for char in name):
+        return False
+
+    for char in name:
+        if not (
+            char.isalpha()
+            or char.isspace()
+            or char in "-'."
+        ):
+            return False
+
+    return True
+
+
+def valid_mobile_or_passport(value):
+    value = value.strip()
+
+    if len(value) < 6 or len(value) > 24:
+        return False
+
+    # Phone number: allow +, spaces, -, (, ), but require 7-15 digits.
+    if re.fullmatch(r"[0-9+\-() ]+", value):
+        digits = re.sub(r"\D", "", value)
+        return 7 <= len(digits) <= 15
+
+    # Passport number: 6-20 alphanumeric characters, at least one letter and digit.
+    passport = value.replace(" ", "").upper()
+
+    if not re.fullmatch(r"[A-Z0-9]{6,20}", passport):
+        return False
+
+    if not any(c.isalpha() for c in passport):
+        return False
+
+    if not any(c.isdigit() for c in passport):
+        return False
+
+    return True
+
+
+def safe_redirect_url(value):
+    if not value:
+        return None
+
+    try:
+        parsed = urlparse(value)
+
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            return value
+    except Exception:
+        pass
+
+    return None
+
+
+def authorize_guest(mac, site, minutes):
+    if not UNIFI_USERNAME:
+        return False, "UniFi username is not configured"
+
+    if not UNIFI_PASSWORD:
+        return False, "UniFi password is not configured"
+
+    session = requests.Session()
+    session.verify = UNIFI_VERIFY_TLS
+
+    try:
+        login = session.post(
+            UNIFI_URL + "/api/login",
+            json={
+                "username": UNIFI_USERNAME,
+                "password": UNIFI_PASSWORD,
+                "remember": True,
+            },
+            timeout=10,
+        )
+
+        if not login.ok:
+            return False, f"UniFi login failed (HTTP {login.status_code})"
+
+        auth = session.post(
+            UNIFI_URL + f"/api/s/{site}/cmd/stamgr",
+            json={
+                "cmd": "authorize-guest",
+                "mac": mac,
+                "minutes": int(minutes),
+            },
+            timeout=10,
+        )
+
+        if not auth.ok:
+            return False, f"UniFi authorization failed (HTTP {auth.status_code})"
+
+        try:
+            result = auth.json()
+
+            if result.get("meta", {}).get("rc") != "ok":
+                return False, "UniFi returned an authorization error"
+        except Exception:
+            return False, "Invalid response from UniFi"
+
+        return True, None
+
+    except requests.RequestException as exc:
+        return False, "Unable to contact UniFi: " + str(exc)
+
+
+def get_active_guest(mac):
+    conn = get_db()
+
+    row = conn.execute("""
+        SELECT *
+        FROM guests
+        WHERE client_mac = ?
+          AND authorized = 1
+          AND expires_at IS NOT NULL
+        ORDER BY id DESC
+        LIMIT 1
+    """, (mac,)).fetchone()
+
+    conn.close()
+
+    if not row:
+        return None, 0
+
+    try:
+        expires = datetime.fromisoformat(row["expires_at"])
+    except Exception:
+        return None, 0
+
+    remaining = (expires - utcnow()).total_seconds()
+
+    if remaining <= 0:
+        return None, 0
+
+    minutes = max(1, math.ceil(remaining / 60))
+    return row, minutes
+
+
+def portal_payload(site, client_mac, ap_mac, ssid, original_url):
+    return serializer.dumps({
+        "site": site,
+        "mac": client_mac,
+        "ap": ap_mac,
+        "ssid": ssid,
+        "url": original_url,
+    })
+
+
+def portal_success(name, redirect_url=None, returning=False):
+    return render_template(
+        "success.html",
+        name=name,
+        redirect_url=redirect_url,
+        returning=returning,
+    )
+
+
+def handle_portal(site):
+    if request.method in ("GET", "HEAD"):
+        client_mac = request.args.get("id", "").strip().lower()
+        ap_mac = request.args.get("ap", "").strip().lower()
+        ssid = request.args.get("ssid", "").strip()
+        original_url = request.args.get("url", "").strip()
+
+        if not MAC_RE.fullmatch(client_mac):
+            return render_template(
+                "error.html",
+                message=(
+                    "Unable to identify this device. "
+                    "Please disconnect and reconnect to WiFi."
+                ),
+            ), 400
+
+        active, remaining = get_active_guest(client_mac)
+
+        if active:
+            ok, _ = authorize_guest(client_mac, site, remaining)
+
+            if ok:
+                return portal_success(
+                    active["name"],
+                    safe_redirect_url(original_url),
+                    returning=True,
+                )
+
+            return render_template(
+                "error.html",
+                message="Unable to restore network access. Please try again.",
+            ), 503
+
+        token = portal_payload(
+            site,
+            client_mac,
+            ap_mac,
+            ssid,
+            original_url,
+        )
+
+        return render_template(
+            "index.html",
+            portal_token=token,
+        )
+
+    token = request.form.get("portal_token", "")
+
+    try:
+        payload = serializer.loads(token, max_age=900)
+    except SignatureExpired:
+        return render_template(
+            "error.html",
+            message="This login session has expired. Please reconnect to WiFi.",
+        ), 400
+    except BadSignature:
+        return render_template(
+            "error.html",
+            message="Invalid login session. Please reconnect to WiFi.",
+        ), 400
+
+    client_mac = payload.get("mac", "").strip().lower()
+    ap_mac = payload.get("ap", "").strip().lower()
+    ssid = payload.get("ssid", "").strip()
+    site = payload.get("site", UNIFI_SITE).strip()
+    original_url = payload.get("url", "").strip()
+
+    if not MAC_RE.fullmatch(client_mac):
+        return render_template(
+            "error.html",
+            message="Invalid client information. Please reconnect to WiFi.",
+        ), 400
+
+    active, remaining = get_active_guest(client_mac)
+
+    if active:
+        ok, _ = authorize_guest(client_mac, site, remaining)
+
+        if ok:
+            return portal_success(
+                active["name"],
+                safe_redirect_url(original_url),
+                returning=True,
+            )
+
+        return render_template(
+            "error.html",
+            message="Unable to authorize network access. Please try again.",
+        ), 503
+
+    access_code = request.form.get("access_code", "").strip()
+    name = request.form.get("name", "").strip()
+    phone = request.form.get("phone", "").strip()
+
+    if not secrets.compare_digest(access_code, PORTAL_ACCESS_CODE):
+        return render_template(
+            "index.html",
+            portal_token=token,
+            name=name,
+            phone=phone,
+            error="Incorrect access code.",
+        ), 400
+
+    if not valid_name(name):
+        return render_template(
+            "index.html",
+            portal_token=token,
+            name=name,
+            phone=phone,
+            error=(
+                "Please enter a valid name. "
+                "The name must contain letters and cannot be numbers only."
+            ),
+        ), 400
+
+    if not valid_mobile_or_passport(phone):
+        return render_template(
+            "index.html",
+            portal_token=token,
+            name=name,
+            phone=phone,
+            error="Please enter a valid mobile number or passport number.",
+        ), 400
+
+    now = utcnow()
+    expires = now + timedelta(minutes=AUTH_MINUTES)
+
+    ok, auth_error = authorize_guest(client_mac, site, AUTH_MINUTES)
+
+    if not ok:
+        return render_template(
+            "index.html",
+            portal_token=token,
+            name=name,
+            phone=phone,
+            error="Unable to enable network access. Please try again.",
+        ), 503
+
+    conn = get_db()
+
+    conn.execute("""
+        INSERT INTO guests (
+            name,
+            phone,
+            client_mac,
+            ap_mac,
+            ssid,
+            site,
+            original_url,
+            remote_ip,
+            created_at,
+            authorized,
+            authorized_at,
+            expires_at,
+            auth_error
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+    """, (
+        name,
+        phone,
+        client_mac,
+        ap_mac,
+        ssid,
+        site,
+        original_url,
+        request.headers.get("X-Real-IP", request.remote_addr),
+        now.isoformat(),
+        now.isoformat(),
+        expires.isoformat(),
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return portal_success(
+        name,
+        safe_redirect_url(original_url),
+        returning=False,
+    )
+
+
+@app.route("/guest/s/<site>/", methods=["GET", "POST", "HEAD"])
+def guest_portal(site):
+    return handle_portal(site)
+
+
+@app.route("/")
+def root():
+    return "UniFi Guest WiFi Portal is running.", 200
+
+
+@app.route("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.route("/admin")
+def admin():
+    if not check_admin():
+        return unauthorized()
+
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT *
+        FROM guests
+        ORDER BY id DESC
+        LIMIT 500
+    """).fetchall()
+    conn.close()
+
+    return render_template("admin.html", rows=rows)
+
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=8000)
