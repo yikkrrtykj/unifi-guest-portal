@@ -1,12 +1,133 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Guest WiFi Admin</title>
-<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;margin:30px;background:#f5f6f8;color:#202124}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;background:#fff}th,td{padding:11px 12px;border-bottom:1px solid #eee;text-align:left;white-space:nowrap}th{background:#f0f2f5}h1{margin-bottom:8px}.count{color:#666;margin-bottom:20px}</style>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
+
+<title>Guest WiFi Admin</title>
+
+<style>
+body {
+    font-family: -apple-system,
+                 BlinkMacSystemFont,
+                 "Segoe UI",
+                 Arial,
+                 sans-serif;
+    margin: 30px;
+    background: #f5f6f8;
+    color: #202124;
+}
+
+.table-wrap {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+}
+
+th,
+td {
+    padding: 11px 12px;
+    border-bottom: 1px solid #eee;
+    text-align: left;
+    white-space: nowrap;
+}
+
+th {
+    background: #f0f2f5;
+}
+
+.yes {
+    font-weight: 600;
+}
+
+h1 {
+    margin-bottom: 8px;
+}
+
+.count {
+    color: #666;
+    margin-bottom: 20px;
+}
+</style>
+
 </head>
+
 <body>
-<h1>Guest WiFi Visitors</h1><div class="count">Recent records: {{ rows|length }}</div>
-<div class="table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Mobile / Passport</th><th>Client MAC</th><th>SSID</th><th>AP MAC</th><th>Client IP</th><th>Authorized</th><th>Authorized At</th><th>Expires At</th></tr></thead><tbody>
-{% for row in rows %}<tr><td>{{ row.id }}</td><td>{{ row.name }}</td><td>{{ row.phone }}</td><td>{{ row.client_mac }}</td><td>{{ row.ssid }}</td><td>{{ row.ap_mac }}</td><td>{{ row.remote_ip }}</td><td>{% if row.authorized %}Yes{% else %}No{% endif %}</td><td>{{ row.authorized_at or '' }}</td><td>{{ row.expires_at or '' }}</td></tr>{% endfor %}
-</tbody></table></div>
-</body></html>
+
+<h1>Guest WiFi Visitors</h1>
+
+<div class="count">
+    Recent records: {{ rows|length }}
+</div>
+
+<div class="table-wrap">
+
+<table>
+
+<thead>
+
+<tr>
+    <th>ID</th>
+    <th>Name</th>
+    <th>Mobile / Passport</th>
+    <th>Client MAC</th>
+    <th>SSID</th>
+    <th>AP MAC</th>
+    <th>Client IP</th>
+    <th>Authorized</th>
+    <th>Authorized At</th>
+    <th>Expires At</th>
+</tr>
+
+</thead>
+
+<tbody>
+
+{% for row in rows %}
+
+<tr>
+    <td>{{ row.id }}</td>
+    <td>{{ row.name }}</td>
+    <td>{{ row.phone }}</td>
+    <td>{{ row.client_mac }}</td>
+    <td>{{ row.ssid }}</td>
+    <td>{{ row.ap_mac }}</td>
+    <td>{{ row.remote_ip }}</td>
+
+    <td class="yes">
+        {% if row.authorized %}
+        Yes
+        {% else %}
+        No
+        {% endif %}
+    </td>
+
+    <td>
+        {{ row.authorized_at or '' }}
+    </td>
+
+    <td>
+        {{ row.expires_at or '' }}
+    </td>
+
+</tr>
+
+{% endfor %}
+
+</tbody>
+
+</table>
+
+</div>
+
+</body>
+
+</html>
