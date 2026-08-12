@@ -1,0 +1,15 @@
+[Unit]
+Description=UniFi Guest WiFi Portal
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/unifi-portal
+EnvironmentFile=/etc/unifi-portal.env
+ExecStart=/opt/unifi-portal/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:8000 --timeout 30 app:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
