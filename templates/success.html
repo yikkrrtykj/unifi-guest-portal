@@ -1,100 +1,64 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-
-<meta charset="UTF-8">
-
-<meta name="viewport"
-      content="width=device-width, initial-scale=1.0">
-
-<title>WiFi Connected</title>
-
-<style>
-body {
-    margin: 0;
-    min-height: 100vh;
-    font-family: -apple-system,
-                 BlinkMacSystemFont,
-                 "Segoe UI",
-                 Arial,
-                 sans-serif;
-    background: #f3f5f9;
-    color: #202124;
-}
-
-.card {
-    max-width: 400px;
-    margin: 80px auto;
-    background: #ffffff;
-    padding: 42px 25px;
-    border-radius: 18px;
-    text-align: center;
-    box-shadow:
-        0 10px 35px rgba(0,0,0,.08);
-}
-
-.ok {
-    font-size: 62px;
-    margin-bottom: 10px;
-}
-
-h1 {
-    margin-bottom: 10px;
-}
-
-p {
-    color: #666;
-    line-height: 1.6;
-}
-</style>
-
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#10082b">
+    <title>WiFi Connected</title>
+    <link rel="stylesheet" href="/static/portal/portal.css">
 </head>
-
 <body>
+    <main class="portal-shell portal-shell--status">
+        <div class="portal-layout">
+            <section class="portal-visual" aria-label="Event welcome">
+                <div class="brand-lockup">
+                    <img class="brand-logo"
+                         src="/static/portal/logo.svg"
+                         alt="Event logo"
+                         onerror="this.hidden=true;this.nextElementSibling.hidden=false">
+                    <span class="brand-fallback" hidden>EVENT</span>
+                </div>
+            </section>
 
-<div class="card">
+            <section class="portal-panel" aria-label="Connection status">
+                <div class="portal-card status-card">
+                    <div class="status-icon status-icon--success" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                            <path d="m6.5 12.5 3.5 3.4 7.5-8"/>
+                        </svg>
+                    </div>
 
-    <div class="ok">✓</div>
+                    <p class="eyebrow">You’re online</p>
+                    <h1>WiFi Connected</h1>
 
-    <h1>WiFi Connected</h1>
+                    {% if returning %}
+                    <p class="status-greeting">Welcome back, <strong>{{ name }}</strong>.</p>
+                    {% else %}
+                    <p class="status-greeting">Thank you, <strong>{{ name }}</strong>.</p>
+                    {% endif %}
 
-    {% if returning %}
+                    <p class="status-copy">Your device now has Internet access.</p>
+                    <p class="status-hint">
+                        {% if redirect_url %}
+                        Taking you to your original destination…
+                        {% else %}
+                        You may close this window.
+                        {% endif %}
+                    </p>
+                </div>
+            </section>
+        </div>
+    </main>
 
-    <p>
-        Welcome back, {{ name }}.
-    </p>
-
-    {% else %}
-
-    <p>
-        Thank you, {{ name }}.
-    </p>
-
+    {% if redirect_url %}
+    <script>
+    setTimeout(function () {
+        window.location.replace(
+            {{ redirect_url|tojson }}
+        );
+    }, 1500);
+    </script>
     {% endif %}
-
-    <p>
-        Your device now has Internet access.
-    </p>
-
-    <p>
-        You may close this window.
-    </p>
-
-</div>
-
-{% if redirect_url %}
-
-<script>
-setTimeout(function () {
-    window.location.replace(
-        {{ redirect_url|tojson }}
-    );
-}, 1500);
-</script>
-
-{% endif %}
-
 </body>
-
 </html>

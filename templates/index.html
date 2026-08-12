@@ -1,203 +1,116 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-<meta charset="UTF-8">
-<meta name="viewport"
-      content="width=device-width, initial-scale=1.0">
-
-<title>Guest WiFi</title>
-
-<style>
-* {
-    box-sizing: border-box;
-}
-
-body {
-    margin: 0;
-    min-height: 100vh;
-    font-family: -apple-system,
-                 BlinkMacSystemFont,
-                 "Segoe UI",
-                 Arial,
-                 sans-serif;
-    background: #f3f5f9;
-    color: #202124;
-}
-
-.container {
-    width: 100%;
-    max-width: 430px;
-    margin: 0 auto;
-    padding: 60px 20px;
-}
-
-.card {
-    background: #ffffff;
-    padding: 34px 26px;
-    border-radius: 18px;
-    box-shadow:
-        0 10px 35px rgba(0,0,0,.08);
-}
-
-.logo {
-    text-align: center;
-    font-size: 42px;
-    font-weight: 700;
-    margin-bottom: 15px;
-}
-
-h1 {
-    text-align: center;
-    font-size: 25px;
-    margin: 0 0 8px;
-}
-
-.subtitle {
-    text-align: center;
-    color: #777;
-    margin-bottom: 30px;
-    line-height: 1.5;
-}
-
-label {
-    display: block;
-    margin: 18px 0 8px;
-    font-weight: 600;
-}
-
-input {
-    width: 100%;
-    height: 50px;
-    border: 1px solid #d8dce5;
-    border-radius: 10px;
-    padding: 0 14px;
-    font-size: 16px;
-    outline: none;
-}
-
-input:focus {
-    border-color: #006fff;
-}
-
-button {
-    width: 100%;
-    height: 52px;
-    border: 0;
-    border-radius: 10px;
-    margin-top: 28px;
-    background: #006fff;
-    color: #ffffff;
-    font-size: 17px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.error {
-    background: #fff0f0;
-    color: #c62828;
-    border-radius: 8px;
-    padding: 11px 12px;
-    margin-bottom: 18px;
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.notice {
-    color: #888;
-    font-size: 12px;
-    line-height: 1.5;
-    margin-top: 22px;
-    text-align: center;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#10082b">
+    <title>Guest WiFi</title>
+    <link rel="stylesheet" href="/static/portal/portal.css">
 </head>
-
 <body>
+    <main class="portal-shell portal-shell--form">
+        <div class="portal-layout">
+            <section class="portal-visual" aria-label="Event welcome">
+                <div class="brand-lockup">
+                    <img class="brand-logo"
+                         src="/static/portal/logo.svg"
+                         alt="Event logo"
+                         onerror="this.hidden=true;this.nextElementSibling.hidden=false">
+                    <span class="brand-fallback" hidden>EVENT</span>
+                </div>
+            </section>
 
-<div class="container">
+            <section class="portal-panel" aria-label="Guest WiFi access">
+                <div class="portal-card portal-card--form">
+                    <header class="card-header">
+                        <p class="eyebrow">Welcome</p>
+                        <h1>Guest WiFi</h1>
+                        <p class="subtitle">Connect to the guest network</p>
+                    </header>
 
-<div class="card">
+                    {% if error %}
+                    <div class="form-alert" role="alert">
+                        <svg aria-hidden="true" viewBox="0 0 24 24">
+                            <path d="M12 8v5m0 3.5v.01M10.3 3.8 2.5 17.3A2 2 0 0 0 4.2 20h15.6a2 2 0 0 0 1.7-2.7L13.7 3.8a2 2 0 0 0-3.4 0Z"/>
+                        </svg>
+                        <span>{{ error }}</span>
+                    </div>
+                    {% endif %}
 
-    <div class="logo">WiFi</div>
+                    <form method="post">
+                        <input type="hidden"
+                               name="portal_token"
+                               value="{{ portal_token }}">
 
-    <h1>Guest WiFi</h1>
+                        <div class="form-field">
+                            <label for="access_code">Access Code</label>
+                            <div class="input-wrap">
+                                <svg aria-hidden="true" viewBox="0 0 24 24">
+                                    <rect x="4.5" y="10" width="15" height="10" rx="2"/>
+                                    <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+                                </svg>
+                                <input id="access_code"
+                                       type="password"
+                                       name="access_code"
+                                       placeholder="Enter WiFi access code"
+                                       maxlength="64"
+                                       autocomplete="off"
+                                       required>
+                            </div>
+                        </div>
 
-    <div class="subtitle">
-        Please enter your information
-        to access the network.
-    </div>
+                        <div class="form-field">
+                            <label for="name">Name</label>
+                            <div class="input-wrap">
+                                <svg aria-hidden="true" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="8" r="3.5"/>
+                                    <path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>
+                                </svg>
+                                <input id="name"
+                                       type="text"
+                                       name="name"
+                                       value="{{ name or '' }}"
+                                       placeholder="Enter your full name"
+                                       maxlength="80"
+                                       autocomplete="name"
+                                       required>
+                            </div>
+                        </div>
 
-    {% if error %}
-    <div class="error">
-        {{ error }}
-    </div>
-    {% endif %}
+                        <div class="form-field">
+                            <label for="phone">Mobile Number / Passport Number</label>
+                            <div class="input-wrap">
+                                <svg aria-hidden="true" viewBox="0 0 24 24">
+                                    <rect x="3" y="5" width="18" height="14" rx="2"/>
+                                    <circle cx="8.5" cy="11" r="2"/>
+                                    <path d="M5.8 16c.7-1.5 1.6-2.2 2.7-2.2s2 .7 2.7 2.2M14 10h4m-4 3h4"/>
+                                </svg>
+                                <input id="phone"
+                                       type="text"
+                                       name="phone"
+                                       value="{{ phone or '' }}"
+                                       placeholder="Enter mobile or passport number"
+                                       maxlength="24"
+                                       autocomplete="off"
+                                       required>
+                            </div>
+                        </div>
 
-    <form method="post">
+                        <button class="primary-button" type="submit">
+                            <span>Connect to WiFi</span>
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                                <path d="m9 18 6-6-6-6"/>
+                            </svg>
+                        </button>
+                    </form>
 
-        <input
-            type="hidden"
-            name="portal_token"
-            value="{{ portal_token }}"
-        >
-<label for="access_code">
-    Access Code
-</label>
-
-<input
-    id="access_code"
-    type="password"
-    name="access_code"
-    placeholder="Enter WiFi access code"
-    maxlength="64"
-    autocomplete="off"
-    required
->
-        <label for="name">
-            Name
-        </label>
-
-        <input
-            id="name"
-            type="text"
-            name="name"
-            value="{{ name or '' }}"
-            placeholder="Enter your full name"
-            maxlength="80"
-            autocomplete="name"
-            required
-        >
-
-        <label for="phone">
-            Mobile Number / Passport Number
-        </label>
-
-        <input
-            id="phone"
-            type="text"
-            name="phone"
-            value="{{ phone or '' }}"
-            placeholder="Enter mobile or passport number"
-            maxlength="24"
-            autocomplete="off"
-            required
-        >
-
-        <button type="submit">
-            Connect to WiFi
-        </button>
-
-    </form>
-
-    <div class="notice">
-        Your information is collected
-        only for guest network access management.
-    </div>
-
-</div>
-
-</div>
-
+                    <p class="privacy-note">
+                        Your information is used only for guest network access management.
+                    </p>
+                </div>
+            </section>
+        </div>
+    </main>
 </body>
 </html>

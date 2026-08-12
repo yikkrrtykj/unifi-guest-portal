@@ -1,0 +1,649 @@
+:root {
+    color-scheme: dark;
+    --portal-accent: #9a67f8;
+    --portal-accent-secondary: #e06bb7;
+    --portal-accent-warm: #e9c47a;
+    --portal-card-bg: rgba(15, 10, 39, .92);
+    --portal-card-bg-blur: rgba(15, 10, 39, .70);
+    --portal-text: #fffaf3;
+    --portal-muted: rgba(245, 239, 255, .70);
+    --portal-border: rgba(255, 255, 255, .17);
+    --portal-input-bg: rgba(255, 255, 255, .075);
+    --portal-danger: #ff9baf;
+    --portal-radius: 24px;
+    --portal-shadow: 0 24px 64px rgba(4, 2, 19, .38);
+    --portal-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    min-height: 100%;
+    background: #10082b;
+}
+
+body {
+    min-width: 280px;
+    min-height: 100%;
+    margin: 0;
+    color: var(--portal-text);
+    font-family: var(--portal-font);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+.portal-shell {
+    --portal-bg-image: url("/static/portal/bg-mobile.jpg");
+    --portal-bg-position: center top;
+    position: relative;
+    z-index: 0;
+    min-height: 100vh;
+    min-height: 100svh;
+    overflow: hidden;
+    isolation: isolate;
+    background-color: #10082b;
+    background-image:
+        radial-gradient(circle at 50% 13%, rgba(139, 92, 246, .36), transparent 34%),
+        radial-gradient(circle at 12% 36%, rgba(224, 107, 183, .18), transparent 30%),
+        var(--portal-bg-image),
+        linear-gradient(145deg, #251052 0%, #10082b 48%, #08051b 100%);
+    background-position:
+        center,
+        center,
+        var(--portal-bg-position),
+        center;
+    background-repeat: no-repeat;
+    background-size: cover;
+}
+
+.portal-shell::before,
+.portal-shell::after {
+    position: absolute;
+    z-index: -1;
+    content: "";
+    pointer-events: none;
+}
+
+.portal-shell::before {
+    inset: 0;
+    background:
+        linear-gradient(180deg,
+            rgba(6, 3, 24, .06) 0%,
+            rgba(8, 4, 27, .08) 30%,
+            rgba(8, 4, 27, .60) 70%,
+            rgba(6, 3, 21, .86) 100%);
+}
+
+.portal-shell::after {
+    width: 86vw;
+    height: 42vh;
+    left: 7vw;
+    bottom: -30vh;
+    border-radius: 50%;
+    background: rgba(154, 103, 248, .26);
+    filter: blur(80px);
+}
+
+.portal-layout {
+    display: grid;
+    grid-template-rows: minmax(190px, 34svh) auto;
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100svh;
+}
+
+.portal-visual {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    min-width: 0;
+    padding:
+        max(32px, env(safe-area-inset-top))
+        max(20px, env(safe-area-inset-right))
+        24px
+        max(20px, env(safe-area-inset-left));
+}
+
+.brand-lockup {
+    display: flex;
+    min-height: 56px;
+    align-items: center;
+    justify-content: center;
+}
+
+.brand-logo {
+    display: block;
+    width: clamp(120px, 37vw, 160px);
+    max-height: 92px;
+    object-fit: contain;
+}
+
+.brand-fallback {
+    color: var(--portal-text);
+    font-size: clamp(24px, 7vw, 36px);
+    font-weight: 700;
+    letter-spacing: .32em;
+    line-height: 1;
+    text-indent: .32em;
+    text-shadow: 0 2px 20px rgba(4, 2, 19, .35);
+}
+
+.portal-panel {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    min-width: 0;
+    padding:
+        0
+        max(16px, env(safe-area-inset-right))
+        max(24px, calc(env(safe-area-inset-bottom) + 18px))
+        max(16px, env(safe-area-inset-left));
+}
+
+.portal-card {
+    width: min(100%, 430px);
+    border: 1px solid var(--portal-border);
+    border-radius: var(--portal-radius);
+    background: var(--portal-card-bg);
+    box-shadow: var(--portal-shadow);
+}
+
+@supports ((-webkit-backdrop-filter: blur(18px)) or (backdrop-filter: blur(18px))) {
+    .portal-card {
+        background: var(--portal-card-bg-blur);
+        -webkit-backdrop-filter: blur(18px) saturate(118%);
+        backdrop-filter: blur(18px) saturate(118%);
+    }
+}
+
+.portal-card--form {
+    padding: 27px 22px 23px;
+}
+
+.card-header {
+    margin-bottom: 23px;
+    text-align: center;
+}
+
+.eyebrow {
+    margin: 0 0 8px;
+    color: var(--portal-accent-warm);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .2em;
+    line-height: 1.3;
+    text-transform: uppercase;
+}
+
+h1 {
+    margin: 0;
+    color: var(--portal-text);
+    font-size: clamp(26px, 8vw, 34px);
+    font-weight: 650;
+    letter-spacing: -.025em;
+    line-height: 1.12;
+}
+
+.subtitle {
+    margin: 8px 0 0;
+    color: var(--portal-muted);
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+.form-alert {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin: 0 0 18px;
+    padding: 11px 12px;
+    border: 1px solid rgba(255, 155, 175, .30);
+    border-radius: 12px;
+    background: rgba(125, 32, 60, .25);
+    color: #ffdce3;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.form-alert svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.form-field + .form-field {
+    margin-top: 15px;
+}
+
+.form-field label {
+    display: block;
+    margin: 0 0 7px;
+    color: rgba(255, 250, 243, .90);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.input-wrap {
+    position: relative;
+}
+
+.input-wrap svg {
+    position: absolute;
+    top: 50%;
+    left: 15px;
+    width: 20px;
+    height: 20px;
+    color: rgba(245, 239, 255, .54);
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.65;
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+
+.input-wrap input {
+    display: block;
+    width: 100%;
+    height: 52px;
+    padding: 0 14px 0 46px;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 13px;
+    outline: none;
+    background: var(--portal-input-bg);
+    color: var(--portal-text);
+    font-size: 16px;
+    line-height: normal;
+    -webkit-appearance: none;
+    appearance: none;
+    transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease;
+}
+
+.input-wrap input::placeholder {
+    color: rgba(245, 239, 255, .43);
+    opacity: 1;
+}
+
+.input-wrap input:hover {
+    border-color: rgba(255, 255, 255, .24);
+}
+
+.input-wrap input:focus {
+    border-color: rgba(180, 132, 255, .92);
+    background: rgba(255, 255, 255, .11);
+    box-shadow: 0 0 0 3px rgba(154, 103, 248, .17);
+}
+
+.input-wrap:focus-within svg {
+    color: #cbb1ff;
+}
+
+.primary-button,
+.secondary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 54px;
+    border-radius: 13px;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform .15s ease, filter .15s ease, box-shadow .15s ease;
+}
+
+.primary-button {
+    width: 100%;
+    gap: 9px;
+    margin-top: 23px;
+    border: 0;
+    background: linear-gradient(115deg, var(--portal-accent), var(--portal-accent-secondary));
+    box-shadow: 0 12px 28px rgba(123, 75, 213, .27);
+}
+
+.primary-button svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
+.primary-button:hover,
+.secondary-button:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+}
+
+.primary-button:active,
+.secondary-button:active {
+    transform: translateY(0);
+}
+
+.primary-button:focus-visible,
+.secondary-button:focus-visible {
+    outline: 3px solid rgba(233, 196, 122, .42);
+    outline-offset: 3px;
+}
+
+.privacy-note {
+    margin: 18px auto 0;
+    color: rgba(245, 239, 255, .53);
+    font-size: 11px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.status-card {
+    padding: 38px 25px 32px;
+    text-align: center;
+}
+
+.status-icon {
+    display: flex;
+    width: 68px;
+    height: 68px;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+    border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 50%;
+}
+
+.status-icon svg {
+    width: 34px;
+    height: 34px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
+.status-icon--success {
+    background: rgba(99, 211, 164, .13);
+    color: #9ce6c6;
+    box-shadow: 0 0 0 8px rgba(99, 211, 164, .04);
+}
+
+.status-icon--error {
+    background: rgba(255, 126, 151, .12);
+    color: var(--portal-danger);
+    box-shadow: 0 0 0 8px rgba(255, 126, 151, .035);
+}
+
+.status-greeting {
+    margin: 20px 0 0;
+    color: var(--portal-text);
+    font-size: 17px;
+    line-height: 1.5;
+}
+
+.status-greeting strong {
+    font-weight: 650;
+}
+
+.status-copy {
+    margin: 11px auto 0;
+    color: var(--portal-muted);
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+.status-hint {
+    margin: 18px auto 0;
+    color: rgba(245, 239, 255, .49);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.secondary-button {
+    width: min(100%, 240px);
+    margin-top: 25px;
+    border: 1px solid rgba(255, 255, 255, .21);
+    background: rgba(255, 255, 255, .08);
+}
+
+/* Tablet portrait: dedicated 1536 × 2048 artwork and a wider touch layout. */
+@media (min-width: 600px) and (max-width: 1023px) and (orientation: portrait) {
+    .portal-shell {
+        --portal-bg-image: url("/static/portal/bg-tablet-portrait.jpg");
+        --portal-bg-position: center top;
+    }
+
+    .portal-layout {
+        grid-template-rows: minmax(300px, 43svh) auto;
+    }
+
+    .portal-visual {
+        padding-top: max(54px, env(safe-area-inset-top));
+    }
+
+    .brand-logo {
+        width: clamp(160px, 24vw, 190px);
+        max-height: 116px;
+    }
+
+    .brand-fallback {
+        font-size: 40px;
+    }
+
+    .portal-panel {
+        padding-right: max(32px, env(safe-area-inset-right));
+        padding-bottom: max(42px, calc(env(safe-area-inset-bottom) + 24px));
+        padding-left: max(32px, env(safe-area-inset-left));
+    }
+
+    .portal-card {
+        width: 60vw;
+        min-width: 430px;
+        max-width: 520px;
+    }
+
+    .portal-card--form {
+        padding: 34px 34px 29px;
+    }
+
+    .input-wrap input {
+        height: 54px;
+    }
+
+    .primary-button {
+        min-height: 56px;
+    }
+}
+
+/* Tablet landscape: 58/42 split, no script or reload on rotation. */
+@media (min-width: 600px) and (max-width: 1199px) and (orientation: landscape) {
+    .portal-shell {
+        --portal-bg-image: url("/static/portal/bg-tablet-landscape.jpg");
+        --portal-bg-position: center center;
+    }
+
+    .portal-shell::before {
+        background: linear-gradient(90deg,
+            rgba(7, 3, 26, .05) 0%,
+            rgba(7, 3, 26, .12) 48%,
+            rgba(7, 3, 26, .66) 66%,
+            rgba(6, 3, 22, .88) 100%);
+    }
+
+    .portal-layout {
+        grid-template-rows: none;
+        grid-template-columns: 58% 42%;
+    }
+
+    .portal-visual {
+        align-items: flex-start;
+        justify-content: center;
+        padding: max(42px, env(safe-area-inset-top)) 36px 36px;
+    }
+
+    .brand-logo {
+        width: clamp(160px, 18vw, 190px);
+        max-height: 108px;
+    }
+
+    .brand-fallback {
+        font-size: 40px;
+    }
+
+    .portal-panel {
+        align-items: center;
+        padding:
+            max(28px, env(safe-area-inset-top))
+            max(32px, env(safe-area-inset-right))
+            max(28px, env(safe-area-inset-bottom))
+            22px;
+    }
+
+    .portal-card {
+        width: 100%;
+        max-width: 500px;
+    }
+
+    .portal-card--form {
+        padding: 28px 28px 24px;
+    }
+
+    .input-wrap input {
+        height: 54px;
+    }
+
+    .primary-button {
+        min-height: 56px;
+    }
+}
+
+/* Desktop: event welcome area on the left, restrained WiFi panel on the right. */
+@media (min-width: 1200px) {
+    .portal-shell {
+        --portal-bg-image: url("/static/portal/bg-desktop.jpg");
+        --portal-bg-position: center center;
+    }
+
+    .portal-shell::before {
+        background: linear-gradient(90deg,
+            rgba(7, 3, 26, .02) 0%,
+            rgba(7, 3, 26, .06) 48%,
+            rgba(7, 3, 26, .55) 68%,
+            rgba(6, 3, 22, .90) 100%);
+    }
+
+    .portal-layout {
+        grid-template-rows: none;
+        grid-template-columns: minmax(0, 1fr) minmax(500px, 35vw);
+    }
+
+    .portal-visual {
+        align-items: flex-start;
+        justify-content: flex-start;
+        padding: max(64px, 8vh) 5vw;
+    }
+
+    .brand-logo {
+        width: clamp(180px, 14vw, 220px);
+        max-height: 132px;
+    }
+
+    .brand-fallback {
+        font-size: 44px;
+    }
+
+    .portal-panel {
+        align-items: center;
+        justify-content: flex-end;
+        padding: 6vh 6vw 6vh 0;
+    }
+
+    .portal-card {
+        width: clamp(480px, 31vw, 540px);
+        max-width: none;
+        flex: 0 0 auto;
+    }
+
+    .portal-card--form {
+        padding: 38px 40px 32px;
+    }
+
+    .card-header {
+        margin-bottom: 27px;
+        text-align: left;
+    }
+
+    h1 {
+        font-size: 36px;
+    }
+
+    .form-field + .form-field {
+        margin-top: 17px;
+    }
+
+    .status-card {
+        padding: 46px 42px 40px;
+    }
+}
+
+/* Very short captive-portal windows must scroll naturally. */
+@media (max-height: 720px) and (orientation: portrait) {
+    .portal-layout {
+        grid-template-rows: minmax(128px, 25svh) auto;
+    }
+
+    .portal-visual {
+        padding-top: max(22px, env(safe-area-inset-top));
+        padding-bottom: 14px;
+    }
+
+    .portal-card--form {
+        padding-top: 23px;
+    }
+}
+
+@media (max-width: 359px) {
+    .portal-panel {
+        padding-right: 10px;
+        padding-left: 10px;
+    }
+
+    .portal-card--form {
+        padding-right: 17px;
+        padding-left: 17px;
+    }
+
+    .input-wrap input {
+        padding-right: 10px;
+        padding-left: 42px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+    }
+}
