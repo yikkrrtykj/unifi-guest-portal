@@ -56,6 +56,56 @@ h1 {
     color: #666;
     margin-bottom: 20px;
 }
+
+.section {
+    margin-top: 34px;
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 14px;
+}
+
+.status-card {
+    padding: 16px;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 3px 14px rgba(0,0,0,.05);
+}
+
+.status-label {
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 7px;
+}
+
+.status-value {
+    font-weight: 700;
+}
+
+.ok {
+    color: #176b37;
+}
+
+.warning {
+    color: #b42318;
+}
+
+.result {
+    white-space: normal;
+    min-width: 280px;
+}
+
+@media (max-width: 800px) {
+    body {
+        margin: 18px;
+    }
+
+    .status-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
 </style>
 
 </head>
@@ -127,6 +177,73 @@ h1 {
 </table>
 
 </div>
+
+<section class="section">
+
+<h2>System Status</h2>
+
+<div class="status-grid">
+    <div class="status-card">
+        <div class="status-label">Portal</div>
+        <div class="status-value ok">Available</div>
+    </div>
+
+    <div class="status-card">
+        <div class="status-label">Database</div>
+        <div class="status-value ok">Available</div>
+    </div>
+
+    <div class="status-card">
+        <div class="status-label">UniFi Controller</div>
+        <div class="status-value {{ 'ok' if unifi_ok else 'warning' }}">
+            {{ unifi_message }}
+        </div>
+    </div>
+
+    <div class="status-card">
+        <div class="status-label">Browser Transport</div>
+        <div class="status-value {{ 'ok' if transport == 'https' else 'warning' }}">
+            {{ 'HTTPS' if transport == 'https' else 'HTTP (internal testing)' }}
+        </div>
+    </div>
+</div>
+
+</section>
+
+<section class="section">
+
+<h2>Recent Staff Actions</h2>
+
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+    <th>Time</th>
+    <th>Actor</th>
+    <th>Action</th>
+    <th>Client MAC</th>
+    <th>Result</th>
+</tr>
+</thead>
+<tbody>
+{% for action in actions %}
+<tr>
+    <td>{{ action.created_at }}</td>
+    <td>{{ action.actor }}</td>
+    <td>{{ action.action }}</td>
+    <td>{{ action.client_mac or '' }}</td>
+    <td class="result">{{ action.result or '' }}</td>
+</tr>
+{% else %}
+<tr>
+    <td colspan="5">No staff actions recorded.</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+</section>
 
 </body>
 

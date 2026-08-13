@@ -5,6 +5,7 @@ import sqlite3
 import secrets
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
@@ -75,12 +76,19 @@ UNIFI_VERIFY_TLS = (
     ).lower() == "true"
 )
 
-AUTH_MINUTES = int(
-    os.environ.get(
-        "AUTH_MINUTES",
-        "480"
+AUTH_RESET_TIMEZONE_NAME = os.environ.get(
+    "AUTH_RESET_TIMEZONE",
+    "Asia/Shanghai"
+).strip()
+
+try:
+    AUTH_RESET_TIMEZONE = ZoneInfo(
+        AUTH_RESET_TIMEZONE_NAME
     )
-)
+except (ZoneInfoNotFoundError, ValueError) as exc:
+    raise RuntimeError(
+        "AUTH_RESET_TIMEZONE is invalid"
+    ) from exc
 
 ADMIN_LOGIN_MAX_FAILURES = int(
     os.environ.get(
@@ -121,11 +129,6 @@ if not ADMIN_USER.strip():
 if not ADMIN_PASSWORD.strip():
     raise RuntimeError(
         "ADMIN_PASSWORD is not configured"
-    )
-
-if AUTH_MINUTES < 1:
-    raise RuntimeError(
-        "AUTH_MINUTES must be a positive integer"
     )
 
 if (
@@ -175,6 +178,38 @@ class RegistrationAlreadyComplete(Exception):
 
 def utcnow():
     return datetime.now(timezone.utc)
+
+
+def next_auth_expiry(now=None):
+    now = now or utcnow()
+    local_now = now.astimezone(
+        AUTH_RESET_TIMEZONE
+    )
+    next_local_date = (
+        local_now.date()
+        + timedelta(days=1)
+    )
+    next_local_midnight = datetime.combine(
+        next_local_date,
+        datetime.min.time(),
+        tzinfo=AUTH_RESET_TIMEZONE
+    )
+
+    return next_local_midnight.astimezone(
+        timezone.utc
+    )
+
+
+def auth_minutes_until(expiry, now=None):
+    now = now or utcnow()
+
+    return max(
+        1,
+        math.ceil(
+            (expiry - now).total_seconds()
+            / 60
+        )
+    )
 
 
 def get_db():
@@ -260,6 +295,18 @@ def init_db():
                 client_mac,
                 registration_state,
                 created_at
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS staff_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guest_id INTEGER,
+                action TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                client_mac TEXT,
+                result TEXT,
+                created_at TEXT NOT NULL
             )
         """)
 
@@ -553,6 +600,45 @@ def unauthorize_guest(mac, site):
         ValueError
     ):
         return False
+
+    finally:
+        session.close()
+
+
+def unifi_connection_status():
+    if not UNIFI_USERNAME or not UNIFI_PASSWORD:
+        return False, "UniFi credentials are not configured"
+
+    session = requests.Session()
+    session.verify = UNIFI_VERIFY_TLS
+
+    try:
+        login = session.post(
+            UNIFI_URL + "/api/login",
+            json={
+                "username": UNIFI_USERNAME,
+                "password": UNIFI_PASSWORD,
+                "remember": False
+            },
+            timeout=10
+        )
+
+        if not login.ok:
+            return False, (
+                "UniFi login failed "
+                f"(HTTP {login.status_code})"
+            )
+
+        return True, "Connected"
+
+    except requests.RequestException:
+        app.logger.exception(
+            "ADMIN_UNIFI_STATUS_FAILED"
+        )
+        return False, "Connection failed"
+
+    finally:
+        session.close()
 
 
 def client_ip():
@@ -906,11 +992,10 @@ def handle_portal(site):
 
     now = utcnow()
 
-    expires = (
+    expires = next_auth_expiry(now)
+    auth_minutes = auth_minutes_until(
+        expires,
         now
-        + timedelta(
-            minutes=AUTH_MINUTES
-        )
     )
     conn = None
 
@@ -1063,7 +1148,7 @@ def handle_portal(site):
     ok, auth_error = authorize_guest(
         client_mac,
         site,
-        AUTH_MINUTES
+        auth_minutes
     )
 
     if not ok:
@@ -1320,11 +1405,31 @@ def admin():
         LIMIT 500
     """).fetchall()
 
+    actions = conn.execute("""
+        SELECT *
+        FROM staff_actions
+        ORDER BY id DESC
+        LIMIT 50
+    """).fetchall()
+
     conn.close()
+
+    unifi_ok, unifi_message = (
+        unifi_connection_status()
+    )
+
+    transport = request.headers.get(
+        "X-Forwarded-Proto",
+        request.scheme
+    )
 
     return render_template(
         "admin.html",
-        rows=rows
+        rows=rows,
+        actions=actions,
+        unifi_ok=unifi_ok,
+        unifi_message=unifi_message,
+        transport=transport
     )
 
 

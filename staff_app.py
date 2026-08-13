@@ -691,18 +691,6 @@ def guest_filter(query, status):
     return where, parameters
 
 
-def serialize_action(row):
-    return {
-        "id": row["id"],
-        "guest_id": row["guest_id"],
-        "action": row["action"] or "",
-        "actor": row["actor"] or "",
-        "client_mac": row["client_mac"] or "",
-        "result": row["result"] or "",
-        "created_at": row["created_at"] or "",
-    }
-
-
 @app.after_request
 def security_headers(response):
     response.headers[
@@ -974,103 +962,6 @@ def api_guests():
         "page": page,
         "pages": pages,
         "page_size": page_size,
-    })
-
-
-@app.route(
-    "/staff/api/actions",
-    methods=["GET"]
-)
-def api_actions():
-    if not logged_in():
-        return jsonify({
-            "ok": False,
-            "error": "Not authenticated"
-        }), 401
-
-    page = positive_int(
-        request.args.get("page"),
-        1,
-        1000000
-    )
-    page_size = positive_int(
-        request.args.get("page_size"),
-        25,
-        100
-    )
-
-    conn = get_db()
-    total = conn.execute(
-        "SELECT COUNT(*) FROM staff_actions"
-    ).fetchone()[0]
-    pages = max(1, math.ceil(total / page_size))
-    page = min(page, pages)
-
-    rows = conn.execute("""
-        SELECT *
-        FROM staff_actions
-        ORDER BY id DESC
-        LIMIT ? OFFSET ?
-    """, (
-        page_size,
-        (page - 1) * page_size
-    )).fetchall()
-    conn.close()
-
-    return jsonify({
-        "ok": True,
-        "actions": [
-            serialize_action(row)
-            for row in rows
-        ],
-        "total": total,
-        "page": page,
-        "pages": pages,
-    })
-
-
-@app.route(
-    "/staff/api/status",
-    methods=["GET"]
-)
-def api_status():
-    if not logged_in():
-        return jsonify({
-            "ok": False,
-            "error": "Not authenticated"
-        }), 401
-
-    database_ok = False
-
-    try:
-        conn = get_db()
-        conn.execute("SELECT 1").fetchone()
-        conn.close()
-        database_ok = True
-    except sqlite3.Error:
-        app.logger.exception(
-            "DASHBOARD_DATABASE_STATUS_FAILED"
-        )
-
-    unifi, error = unifi_login()
-    unifi_ok = unifi is not None
-
-    if unifi:
-        unifi.close()
-
-    return jsonify({
-        "ok": True,
-        "portal": True,
-        "database": database_ok,
-        "unifi": unifi_ok,
-        "unifi_error": "" if unifi_ok else error,
-        "transport": (
-            request.headers.get(
-                "X-Forwarded-Proto",
-                request.scheme
-            )
-        ),
-        "checked_at": utcnow().isoformat(),
     })
 
 

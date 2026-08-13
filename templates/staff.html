@@ -668,73 +668,6 @@ td {
     </div>
 
 
-    <section class="section">
-
-        <div class="section-head">
-            <div>
-                <h2>System Status</h2>
-                <p>Live checks for this portal environment.</p>
-            </div>
-
-            <button
-                id="checkStatus"
-                class="secondary-btn"
-                type="button"
-            >Check now</button>
-        </div>
-
-        <div class="status-grid">
-            <div class="service-card">
-                <div class="service-name">Portal</div>
-                <div id="portalStatus" class="service-value">Not checked</div>
-            </div>
-            <div class="service-card">
-                <div class="service-name">Database</div>
-                <div id="databaseStatus" class="service-value">Not checked</div>
-            </div>
-            <div class="service-card">
-                <div class="service-name">UniFi Controller</div>
-                <div id="unifiStatus" class="service-value">Not checked</div>
-            </div>
-            <div class="service-card">
-                <div class="service-name">Browser Transport</div>
-                <div id="transportStatus" class="service-value">Not checked</div>
-            </div>
-        </div>
-
-    </section>
-
-
-    <section class="section">
-
-        <div class="section-head">
-            <div>
-                <h2>Recent Staff Actions</h2>
-                <p>Most recent force re-registration results.</p>
-            </div>
-        </div>
-
-        <div class="table-wrap">
-            <table>
-                <thead>
-                <tr>
-                    <th>Time</th>
-                    <th>Actor</th>
-                    <th>Action</th>
-                    <th>Client MAC</th>
-                    <th>Result</th>
-                </tr>
-                </thead>
-                <tbody id="actionRows">
-                <tr>
-                    <td colspan="5" class="empty">Loading actions…</td>
-                </tr>
-                </tbody>
-            </table>
-        </div>
-
-    </section>
-
 </div>
 
 
@@ -824,9 +757,6 @@ const nextPage =
 
 const pageStatus =
     document.getElementById("pageStatus");
-
-const actionRows =
-    document.getElementById("actionRows");
 
 const modalBackdrop =
     document.getElementById("modalBackdrop");
@@ -1111,123 +1041,6 @@ async function loadGuests() {
 }
 
 
-async function loadActions() {
-
-    try {
-        const response = await fetch(
-            "/staff/api/actions?page_size=20",
-            {cache: "no-store"}
-        );
-
-        if (response.status === 401) {
-            window.location = "/staff/login";
-            return;
-        }
-
-        const data = await response.json();
-
-        if (!data.ok) {
-            throw new Error("Unable to load actions.");
-        }
-
-        const actions = data.actions || [];
-
-        if (actions.length === 0) {
-            actionRows.innerHTML = `
-                <tr>
-                    <td colspan="5" class="empty">
-                        No staff actions recorded.
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        actionRows.innerHTML = actions.map(
-            action => `
-                <tr>
-                    <td>${escapeHtml(formatTime(action.created_at))}</td>
-                    <td>${escapeHtml(action.actor)}</td>
-                    <td>${escapeHtml(action.action)}</td>
-                    <td>${escapeHtml(action.client_mac || "—")}</td>
-                    <td class="audit-result">${escapeHtml(action.result || "—")}</td>
-                </tr>
-            `
-        ).join("");
-
-    } catch (error) {
-        actionRows.innerHTML = `
-            <tr>
-                <td colspan="5" class="empty">
-                    Unable to load staff actions.
-                </td>
-            </tr>
-        `;
-    }
-}
-
-
-function setServiceStatus(elementId, ok, text) {
-    const element = document.getElementById(elementId);
-    element.textContent = text;
-    element.className =
-        "service-value " + (ok ? "ok" : "bad");
-}
-
-
-async function loadSystemStatus() {
-    const button = document.getElementById("checkStatus");
-    button.disabled = true;
-    button.textContent = "Checking…";
-
-    try {
-        const response = await fetch(
-            "/staff/api/status",
-            {cache: "no-store"}
-        );
-
-        if (response.status === 401) {
-            window.location = "/staff/login";
-            return;
-        }
-
-        const data = await response.json();
-
-        setServiceStatus(
-            "portalStatus",
-            data.portal,
-            data.portal ? "Available" : "Unavailable"
-        );
-        setServiceStatus(
-            "databaseStatus",
-            data.database,
-            data.database ? "Available" : "Unavailable"
-        );
-        setServiceStatus(
-            "unifiStatus",
-            data.unifi,
-            data.unifi ? "Connected" : "Connection failed"
-        );
-
-        const isHttps = data.transport === "https";
-        setServiceStatus(
-            "transportStatus",
-            isHttps,
-            isHttps ? "HTTPS" : "HTTP (internal testing)"
-        );
-
-    } catch (error) {
-        setServiceStatus("portalStatus", false, "Check failed");
-        setServiceStatus("databaseStatus", false, "Check failed");
-        setServiceStatus("unifiStatus", false, "Check failed");
-        setServiceStatus("transportStatus", false, "Check failed");
-    } finally {
-        button.disabled = false;
-        button.textContent = "Check now";
-    }
-}
-
-
 function openModal(id) {
 
     selectedGuest =
@@ -1418,14 +1231,6 @@ nextPage.addEventListener(
 );
 
 
-document
-    .getElementById("checkStatus")
-    .addEventListener(
-        "click",
-        loadSystemStatus
-    );
-
-
 cancelButton.addEventListener(
     "click",
     closeModal
@@ -1466,17 +1271,10 @@ document.addEventListener(
 
 
 loadGuests();
-loadActions();
-loadSystemStatus();
 
 setInterval(
     loadGuests,
     10000
-);
-
-setInterval(
-    loadActions,
-    30000
 );
 
 </script>

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -30,6 +31,7 @@ class SecurityTests(unittest.TestCase):
             "PORTAL_SECRET": "test-secret-for-automated-tests",
             "UNIFI_USERNAME": "unifi-user",
             "UNIFI_PASSWORD": "unifi-password",
+            "AUTH_RESET_TIMEZONE": "Asia/Shanghai",
             "STAFF_LOGIN_MAX_FAILURES": "5",
             "STAFF_LOGIN_WINDOW_SECONDS": "600",
             "STAFF_LOGIN_BLOCK_SECONDS": "900",
@@ -107,10 +109,10 @@ class SecurityTests(unittest.TestCase):
             result.stderr,
         )
 
-    def test_portal_rejects_non_positive_authorization_time(self):
+    def test_portal_rejects_invalid_authorization_timezone(self):
         script = "import app"
         env = os.environ.copy()
-        env["AUTH_MINUTES"] = "0"
+        env["AUTH_RESET_TIMEZONE"] = "Not/A-Timezone"
 
         import subprocess
 
@@ -125,8 +127,36 @@ class SecurityTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
-            "AUTH_MINUTES must be a positive integer",
+            "AUTH_RESET_TIMEZONE is invalid",
             result.stderr,
+        )
+
+    def test_authorization_expires_at_next_shanghai_midnight(self):
+        now = datetime(
+            2026,
+            8,
+            13,
+            7,
+            35,
+            30,
+            tzinfo=timezone.utc,
+        )
+        expires = self.portal.next_auth_expiry(now)
+
+        self.assertEqual(
+            expires,
+            datetime(
+                2026,
+                8,
+                13,
+                16,
+                0,
+                tzinfo=timezone.utc,
+            ),
+        )
+        self.assertEqual(
+            self.portal.auth_minutes_until(expires, now),
+            505,
         )
 
     def test_staff_fails_closed_without_staff_user(self):
@@ -219,11 +249,27 @@ class SecurityTests(unittest.TestCase):
 
     def test_successful_authorization_finalizes_pending_record(self):
         mac = "02:00:00:00:00:21"
+        now = datetime(
+            2026,
+            8,
+            13,
+            7,
+            35,
+            30,
+            tzinfo=timezone.utc,
+        )
 
-        with mock.patch.object(
-            self.portal,
-            "authorize_guest",
-            return_value=(True, None),
+        with (
+            mock.patch.object(
+                self.portal,
+                "utcnow",
+                return_value=now,
+            ),
+            mock.patch.object(
+                self.portal,
+                "authorize_guest",
+                return_value=(True, None),
+            ) as authorize,
         ):
             response = self.portal_post(mac)
 
@@ -232,7 +278,9 @@ class SecurityTests(unittest.TestCase):
         conn = sqlite3.connect(self.db_path)
         row = conn.execute(
             """
-                SELECT authorized, registration_state
+                SELECT authorized,
+                       registration_state,
+                       expires_at
                 FROM guests
                 WHERE client_mac = ?
             """,
@@ -240,7 +288,16 @@ class SecurityTests(unittest.TestCase):
         ).fetchone()
         conn.close()
 
-        self.assertEqual(row, (1, "complete"))
+        self.assertEqual(row[:2], (1, "complete"))
+        self.assertEqual(
+            row[2],
+            "2026-08-13T16:00:00+00:00",
+        )
+        authorize.assert_called_once_with(
+            mac,
+            "default",
+            505,
+        )
 
     def test_database_initialization_is_concurrency_safe(self):
         errors = []
@@ -402,6 +459,30 @@ class SecurityTests(unittest.TestCase):
             0,
         )
 
+    def test_admin_dashboard_exposes_private_sections(self):
+        client = self.portal.app.test_client()
+        credentials = base64.b64encode(
+            b"admin:admin-password"
+        ).decode("ascii")
+
+        with mock.patch.object(
+            self.portal,
+            "unifi_connection_status",
+            return_value=(True, "Connected"),
+        ):
+            response = client.get(
+                "/admin",
+                headers={
+                    "Authorization": (
+                        f"Basic {credentials}"
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"System Status", response.data)
+        self.assertIn(b"Recent Staff Actions", response.data)
+
     def test_guest_responses_include_security_headers(self):
         response = self.portal.app.test_client().get(
             "/health"
@@ -518,7 +599,7 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(data["pages"], 3)
         self.assertEqual(len(data["guests"]), 10)
 
-    def test_staff_dashboard_exposes_status_and_audit_sections(self):
+    def test_staff_dashboard_hides_admin_only_sections(self):
         client = self.staff.app.test_client()
 
         with client.session_transaction() as session:
@@ -527,10 +608,10 @@ class SecurityTests(unittest.TestCase):
         response = client.get("/staff/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"System Status", response.data)
-        self.assertIn(b"Recent Staff Actions", response.data)
+        self.assertNotIn(b"System Status", response.data)
+        self.assertNotIn(b"Recent Staff Actions", response.data)
 
-    def test_staff_actions_api_returns_audit_records(self):
+    def test_staff_admin_only_apis_are_not_available(self):
         conn = sqlite3.connect(self.db_path)
         conn.execute(
             """
@@ -561,43 +642,14 @@ class SecurityTests(unittest.TestCase):
         with client.session_transaction() as session:
             session["staff_user"] = "staff"
 
-        response = client.get("/staff/api/actions")
-        data = response.get_json()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(data["total"], 1)
         self.assertEqual(
-            data["actions"][0]["actor"],
-            "staff",
+            client.get("/staff/api/actions").status_code,
+            404,
         )
-
-    def test_staff_status_api_checks_database_and_unifi(self):
-        client = self.staff.app.test_client()
-
-        with client.session_transaction() as session:
-            session["staff_user"] = "staff"
-
-        unifi = mock.Mock()
-
-        with mock.patch.object(
-            self.staff,
-            "unifi_login",
-            return_value=(unifi, None),
-        ):
-            response = client.get(
-                "/staff/api/status",
-                headers={
-                    "X-Forwarded-Proto": "https",
-                },
-            )
-
-        data = response.get_json()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(data["database"])
-        self.assertTrue(data["unifi"])
-        self.assertEqual(data["transport"], "https")
-        unifi.close.assert_called_once_with()
+        self.assertEqual(
+            client.get("/staff/api/status").status_code,
+            404,
+        )
 
     def test_failed_authorization_removes_pending_record(self):
         mac = "02:00:00:00:00:22"

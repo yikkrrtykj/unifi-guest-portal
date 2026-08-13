@@ -127,8 +127,8 @@ UNIFI_USERNAME=
 UNIFI_PASSWORD=
 UNIFI_VERIFY_TLS=false
 
-# Guest authorization period in minutes
-AUTH_MINUTES=480
+# Guests must register again after midnight in this timezone
+AUTH_RESET_TIMEZONE=Asia/Shanghai
 
 # Brute-force protection (seconds except *_MAX_FAILURES)
 ADMIN_LOGIN_MAX_FAILURES=5
@@ -269,9 +269,9 @@ UniFi authorize-guest
 Internet access
 ```
 
-The default authorization period is 480 minutes (8 hours).
+Each registration remains valid until the next midnight in `AUTH_RESET_TIMEZONE` (default: `Asia/Shanghai`). A guest who registers at 09:00 remains authorized until 00:00 that night; a guest who registers at 23:50 remains authorized until 00:00 ten minutes later. The registration records remain in SQLite after expiration.
 
-During that active period, if the same MAC returns to the portal, the application can restore the remaining authorization instead of asking for another registration.
+Before that midnight, if the same MAC returns to the portal, the application can restore the remaining authorization instead of asking for another registration. After midnight, the device must submit a new registration. UniFi accepts authorization duration in whole minutes, so its network cutoff can be up to 59 seconds after the database expiration boundary.
 
 New registrations are first stored with a pending state, then authorized through UniFi, and finally marked complete. If final database persistence fails after authorization, the portal attempts an immediate compensating `unauthorize-guest` call and records the registration as failed.
 
@@ -344,7 +344,7 @@ The dashboard shows:
 - Current portal status
 - Force Re-register action
 
-The dashboard provides server-side search, status filtering and pagination, and refreshes the current page automatically. It also shows recent staff actions and on-demand portal, database, UniFi controller and browser transport checks.
+The dashboard provides server-side search, status filtering and pagination, and refreshes the current page automatically. Operational system status and the staff-action audit are intentionally omitted from `/staff/`; they are available only on the internal `/admin` page protected by `ADMIN_USER` and `ADMIN_PASSWORD`.
 
 ## Updating an existing server
 
