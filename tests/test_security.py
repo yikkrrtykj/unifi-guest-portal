@@ -635,6 +635,8 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"System Status", response.data)
         self.assertNotIn(b"Recent Staff Actions", response.data)
+        self.assertNotIn(b"Force Re-register", response.data)
+        self.assertNotIn(b"/staff/api/revoke/", response.data)
 
     def test_staff_admin_only_apis_are_not_available(self):
         conn = sqlite3.connect(self.db_path)
@@ -673,6 +675,10 @@ class SecurityTests(unittest.TestCase):
         )
         self.assertEqual(
             client.get("/staff/api/status").status_code,
+            404,
+        )
+        self.assertEqual(
+            client.post("/staff/api/revoke/1").status_code,
             404,
         )
 

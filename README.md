@@ -343,9 +343,8 @@ The dashboard shows:
 - Registration time
 - Expiration time
 - Current portal status
-- Force Re-register action
 
-The dashboard provides server-side search, status filtering and pagination, and refreshes the current page automatically. Operational system status and the staff-action audit are intentionally omitted from `/staff/`; they are available only after signing in to the internal `/admin` page with `ADMIN_USER` and `ADMIN_PASSWORD`. The admin page does not duplicate the guest visitor list.
+The dashboard is read-only. It provides server-side search, status filtering and pagination, and refreshes the current page automatically. It cannot disconnect clients, revoke access or alter guest records. Operational system status and the historical staff-action audit are intentionally omitted from `/staff/`; they are available only after signing in to the internal `/admin` page with `ADMIN_USER` and `ADMIN_PASSWORD`. The admin page does not duplicate the guest visitor list.
 
 ## Updating an existing server
 
@@ -372,40 +371,12 @@ After that first update, the helper is installed at `/opt/unifi-portal/deploy/up
 
 The script does not close the parent SSH session. Backups are stored under `/opt/unifi-portal-backups`.
 
-### Force Re-register
-
-When staff chooses **Force Re-register**:
-
-1. the server calls `unauthorize-guest`
-2. the server attempts `kick-sta`
-3. the server repeats revoke/kick after one second
-4. active database registration for that MAC is marked revoked
-5. the user must complete registration again once UniFi removes access
-
-### Known self-hosted controller behavior
-
-On some self-hosted UniFi Network Server versions, `unauthorize-guest` succeeds but `kick-sta` returns HTTP 400.
-
-Example log:
-
-```text
-UNIFI_STA_COMMAND cmd=unauthorize-guest ... http=200 rc=ok ok=True
-UNIFI_STA_COMMAND cmd=kick-sta ... http=400 rc=error ok=False
-```
-
-In that case, guest authorization is still revoked, but traffic may continue briefly until the controller/AP applies the new guest state. A delay of tens of seconds can occur.
-
-Do not assume `kick-sta` works on every self-hosted controller version.
-
 ## 9. Logging and audit
 
 Staff service logs include:
 
 - successful staff logins
 - failed staff logins
-- force re-registration requests
-- UniFi station command results
-- force re-registration results
 
 View live logs:
 
@@ -417,12 +388,9 @@ Example:
 
 ```text
 STAFF_LOGIN_SUCCESS user=admin ip=192.168.x.x
-FORCE_REREGISTER_REQUEST actor=admin guest_id=13 mac=xx:xx:xx:xx:xx:xx
-UNIFI_STA_COMMAND cmd=unauthorize-guest ... rc=ok ok=True
-FORCE_REREGISTER_RESULT ... ok=True
 ```
 
-The SQLite database also stores staff actions in the `staff_actions` table.
+The SQLite database retains historical staff actions in the `staff_actions` table from older releases, but the read-only staff dashboard cannot create new actions.
 
 Example audit query:
 
@@ -528,6 +496,5 @@ Developed and tested around:
 - legacy controller login endpoint `/api/login`
 - guest authorization endpoint `/api/s/{site}/cmd/stamgr`
 - `authorize-guest`
-- `unauthorize-guest`
 
 The code does not use the newer UniFi OS Integrations API key flow.

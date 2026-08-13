@@ -1,12 +1,8 @@
 import os
-import re
-import time
 import math
 import sqlite3
 import secrets
 from datetime import datetime, timezone, timedelta
-
-import requests
 
 from flask import (
     Flask,
@@ -16,12 +12,6 @@ from flask import (
     url_for,
     session,
     jsonify,
-)
-
-from itsdangerous import (
-    URLSafeTimedSerializer,
-    BadSignature,
-    SignatureExpired,
 )
 
 from rate_limit import (
@@ -55,33 +45,6 @@ STAFF_PASSWORD = os.environ.get(
 PORTAL_SECRET = os.environ.get(
     "PORTAL_SECRET",
     ""
-)
-
-UNIFI_URL = os.environ.get(
-    "UNIFI_URL",
-    "https://YOUR_UNIFI_CONTROLLER:8443"
-).rstrip("/")
-
-UNIFI_SITE = os.environ.get(
-    "UNIFI_SITE",
-    "default"
-)
-
-UNIFI_USERNAME = os.environ.get(
-    "UNIFI_USERNAME",
-    ""
-)
-
-UNIFI_PASSWORD = os.environ.get(
-    "UNIFI_PASSWORD",
-    ""
-)
-
-UNIFI_VERIFY_TLS = (
-    os.environ.get(
-        "UNIFI_VERIFY_TLS",
-        "false"
-    ).lower() == "true"
 )
 
 STAFF_COOKIE_SECURE = (
@@ -160,30 +123,6 @@ app.config.update(
     SESSION_COOKIE_SECURE=STAFF_COOKIE_SECURE,
     PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
 )
-
-
-serializer = URLSafeTimedSerializer(
-    PORTAL_SECRET,
-    salt="guest-wifi-staff"
-)
-
-
-MAC_RE = re.compile(
-    r"^[0-9a-fA-F]{2}:"
-    r"[0-9a-fA-F]{2}:"
-    r"[0-9a-fA-F]{2}:"
-    r"[0-9a-fA-F]{2}:"
-    r"[0-9a-fA-F]{2}:"
-    r"[0-9a-fA-F]{2}$"
-)
-
-SITE_RE = re.compile(
-    r"^[A-Za-z0-9_-]{1,64}$"
-)
-
-
-if not UNIFI_VERIFY_TLS:
-    requests.packages.urllib3.disable_warnings()
 
 
 def utcnow():
@@ -376,218 +315,6 @@ def clear_staff_login_failures(username):
         DB_PATH,
         staff_login_limit_keys(username)
     )
-
-
-def safe_site(site):
-    site = (site or "").strip()
-
-    if SITE_RE.fullmatch(site):
-        return site
-
-    return UNIFI_SITE
-
-
-def response_ok(response):
-    if not response.ok:
-        return False
-
-    try:
-        result = response.json()
-
-        return (
-            result
-            .get("meta", {})
-            .get("rc")
-            == "ok"
-        )
-
-    except Exception:
-        return False
-
-
-def unifi_login():
-    if not UNIFI_USERNAME:
-        return None, "UniFi username is not configured"
-
-    if not UNIFI_PASSWORD:
-        return None, "UniFi password is not configured"
-
-    unifi = requests.Session()
-    unifi.verify = UNIFI_VERIFY_TLS
-
-    try:
-        login = unifi.post(
-            UNIFI_URL + "/api/login",
-            json={
-                "username": UNIFI_USERNAME,
-                "password": UNIFI_PASSWORD,
-                "remember": True
-            },
-            timeout=10
-        )
-
-    except requests.RequestException as exc:
-        return None, (
-            "Unable to contact UniFi: "
-            + str(exc)
-        )
-
-    if not login.ok:
-        return None, (
-            "UniFi login failed "
-            f"(HTTP {login.status_code})"
-        )
-
-    return unifi, None
-
-
-def send_sta_command(
-    unifi,
-    site,
-    command,
-    mac
-):
-    endpoint = (
-        UNIFI_URL
-        + f"/api/s/{safe_site(site)}/cmd/stamgr"
-    )
-
-    try:
-        response = unifi.post(
-            endpoint,
-            json={
-                "cmd": command,
-                "mac": mac
-            },
-            timeout=10
-        )
-
-        ok = response_ok(response)
-
-        try:
-            rc = (
-                response.json()
-                .get("meta", {})
-                .get("rc", "unknown")
-            )
-        except Exception:
-            rc = "invalid-json"
-
-        app.logger.info(
-            "UNIFI_STA_COMMAND cmd=%s mac=%s site=%s http=%s rc=%s ok=%s",
-            command,
-            mac,
-            safe_site(site),
-            response.status_code,
-            rc,
-            ok
-        )
-
-        return (
-            ok,
-            response.status_code
-        )
-
-    except requests.RequestException as exc:
-        app.logger.exception(
-            "UNIFI_STA_COMMAND_FAILED cmd=%s mac=%s site=%s error=%s",
-            command,
-            mac,
-            safe_site(site),
-            exc
-        )
-
-        return False, 0
-
-
-def revoke_guest(mac, site):
-    unifi, error = unifi_login()
-
-    if error:
-        return False, error
-
-    # First revoke.
-    revoke1, status1 = send_sta_command(
-        unifi,
-        site,
-        "unauthorize-guest",
-        mac
-    )
-
-    if not revoke1:
-        return False, (
-            "UniFi guest revoke failed "
-            f"(HTTP {status1})"
-        )
-
-    # Immediately force the station off the AP.
-    kick1, _ = send_sta_command(
-        unifi,
-        site,
-        "kick-sta",
-        mac
-    )
-
-    # Give the AP/controller a moment to update,
-    # then revoke and kick once more to avoid
-    # a fast reconnect racing the first revoke.
-    time.sleep(1.0)
-
-    revoke2, _ = send_sta_command(
-        unifi,
-        site,
-        "unauthorize-guest",
-        mac
-    )
-
-    kick2, _ = send_sta_command(
-        unifi,
-        site,
-        "kick-sta",
-        mac
-    )
-
-    if kick1 or kick2:
-        return True, (
-            "Access revoked and client disconnected."
-        )
-
-    if revoke2:
-        return True, (
-            "Access revoked. Client authorization "
-            "has been removed."
-        )
-
-    return True, (
-        "Access revoked."
-    )
-
-
-def write_action(
-    conn,
-    guest_id,
-    actor,
-    mac,
-    result
-):
-    conn.execute("""
-        INSERT INTO staff_actions (
-            guest_id,
-            action,
-            actor,
-            client_mac,
-            result,
-            created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        guest_id,
-        "force-reregister",
-        actor,
-        mac,
-        result,
-        utcnow().isoformat()
-    ))
 
 
 def guest_status(row):
@@ -852,14 +579,8 @@ def staff():
             url_for("staff_login")
         )
 
-    csrf_token = serializer.dumps({
-        "action": "force-reregister",
-        "user": session["staff_user"]
-    })
-
     return render_template(
         "staff.html",
-        csrf_token=csrf_token,
         staff_user=session["staff_user"]
     )
 
@@ -962,174 +683,6 @@ def api_guests():
         "page": page,
         "pages": pages,
         "page_size": page_size,
-    })
-
-
-@app.route(
-    "/staff/api/revoke/<int:guest_id>",
-    methods=["POST"]
-)
-def api_revoke(guest_id):
-    if not logged_in():
-        return jsonify({
-            "ok": False,
-            "error": "Not authenticated"
-        }), 401
-
-    data = request.get_json(
-        silent=True
-    ) or {}
-
-    csrf_token = data.get(
-        "csrf_token",
-        ""
-    )
-
-    try:
-        payload = serializer.loads(
-            csrf_token,
-            max_age=3600
-        )
-
-        if (
-            payload.get("action")
-            != "force-reregister"
-        ):
-            raise BadSignature(
-                "Invalid action"
-            )
-
-        if (
-            payload.get("user")
-            != session["staff_user"]
-        ):
-            raise BadSignature(
-                "Invalid user"
-            )
-
-    except (
-        BadSignature,
-        SignatureExpired
-    ):
-        return jsonify({
-            "ok": False,
-            "error": "Invalid or expired request."
-        }), 400
-
-    conn = get_db()
-
-    row = conn.execute("""
-        SELECT *
-        FROM guests
-        WHERE id = ?
-    """, (
-        guest_id,
-    )).fetchone()
-
-    if not row:
-        conn.close()
-
-        return jsonify({
-            "ok": False,
-            "error": "Guest record not found."
-        }), 404
-
-    mac = (
-        row["client_mac"]
-        or ""
-    ).strip().lower()
-
-    site = safe_site(
-        row["site"]
-        or UNIFI_SITE
-    )
-
-    actor = session["staff_user"]
-
-    if not MAC_RE.fullmatch(mac):
-
-        result = (
-            "This record does not contain "
-            "a valid client MAC."
-        )
-
-        write_action(
-            conn,
-            guest_id,
-            actor,
-            mac,
-            result
-        )
-
-        conn.commit()
-        conn.close()
-
-        return jsonify({
-            "ok": False,
-            "error": result
-        }), 400
-
-    app.logger.info(
-        "FORCE_REREGISTER_REQUEST actor=%s guest_id=%s mac=%s",
-        actor,
-        guest_id,
-        mac
-    )
-
-    ok, result = revoke_guest(
-        mac,
-        site
-    )
-
-    app.logger.info(
-        "FORCE_REREGISTER_RESULT actor=%s guest_id=%s mac=%s ok=%s result=%s",
-        actor,
-        guest_id,
-        mac,
-        ok,
-        result
-    )
-
-    write_action(
-        conn,
-        guest_id,
-        actor,
-        mac,
-        result
-    )
-
-    if ok:
-        now = utcnow().isoformat()
-
-        conn.execute("""
-            UPDATE guests
-            SET authorized = 0,
-                expires_at = ?,
-                revoked_at = ?,
-                revoked_by = ?
-            WHERE client_mac = ?
-              AND authorized = 1
-        """, (
-            now,
-            now,
-            actor,
-            mac
-        ))
-
-    conn.commit()
-    conn.close()
-
-    if not ok:
-        return jsonify({
-            "ok": False,
-            "error": result
-        }), 502
-
-    return jsonify({
-        "ok": True,
-        "message": (
-            f"{row['name']} must register again."
-        )
     })
 
 

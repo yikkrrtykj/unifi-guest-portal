@@ -317,148 +317,10 @@ td {
     background: #999;
 }
 
-.force-btn {
-    border: 0;
-    border-radius: 8px;
-    padding: 9px 13px;
-    background: #fff0f0;
-    color: #c4322b;
-    font-weight: 650;
-    cursor: pointer;
-}
-
-.force-btn:hover {
-    background: #ffe3e3;
-}
-
 .empty {
     padding: 50px;
     text-align: center;
     color: #888;
-}
-
-.modal-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    background: rgba(18, 22, 28, .48);
-    backdrop-filter: blur(4px);
-}
-
-.modal-backdrop.show {
-    display: flex;
-}
-
-.modal {
-    width: 100%;
-    max-width: 430px;
-    background: white;
-    border-radius: 18px;
-    padding: 27px;
-    box-shadow:
-        0 25px 80px rgba(0,0,0,.22);
-}
-
-.modal-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 13px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #fff0f0;
-    color: #c4322b;
-    font-size: 22px;
-    font-weight: 700;
-}
-
-.modal h2 {
-    margin: 18px 0 8px;
-    font-size: 21px;
-}
-
-.modal p {
-    margin: 0;
-    color: #666;
-    line-height: 1.6;
-}
-
-.modal-user {
-    margin-top: 17px;
-    background: #f5f6f8;
-    border-radius: 10px;
-    padding: 13px 14px;
-    font-weight: 650;
-}
-
-.modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    margin-top: 24px;
-}
-
-.cancel-btn,
-.confirm-btn {
-    min-width: 100px;
-    height: 42px;
-    border-radius: 9px;
-    cursor: pointer;
-    font-weight: 650;
-}
-
-.cancel-btn {
-    border: 1px solid #d8dce5;
-    background: white;
-    color: #333;
-}
-
-.confirm-btn {
-    border: 0;
-    background: #d92d20;
-    color: white;
-}
-
-.confirm-btn:disabled {
-    opacity: .55;
-    cursor: default;
-}
-
-.toast {
-    position: fixed;
-    z-index: 2000;
-    top: 22px;
-    right: 22px;
-    width: min(390px, calc(100vw - 44px));
-    padding: 14px 16px;
-    border-radius: 12px;
-    background: #222;
-    color: white;
-    box-shadow:
-        0 10px 35px rgba(0,0,0,.20);
-    opacity: 0;
-    transform: translateY(-12px);
-    pointer-events: none;
-    transition:
-        opacity .2s ease,
-        transform .2s ease;
-}
-
-.toast.show {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-.toast.success {
-    background: #176b37;
-}
-
-.toast.error {
-    background: #b42318;
 }
 
 @media (max-width: 760px) {
@@ -629,7 +491,6 @@ td {
                 <th>Registered</th>
                 <th>Expires</th>
                 <th>Status</th>
-                <th>Action</th>
             </tr>
 
             </thead>
@@ -638,7 +499,7 @@ td {
 
             <tr>
                 <td
-                    colspan="7"
+                    colspan="6"
                     class="empty"
                 >
                     Loading guests…
@@ -671,70 +532,9 @@ td {
 </div>
 
 
-<div
-    id="modalBackdrop"
-    class="modal-backdrop"
->
-
-    <div class="modal">
-
-        <div class="modal-icon">
-            !
-        </div>
-
-        <h2>
-            Force re-registration?
-        </h2>
-
-        <p>
-            This guest will lose network access
-            and must complete the WiFi registration
-            form again.
-        </p>
-
-        <div
-            id="modalUser"
-            class="modal-user"
-        ></div>
-
-        <div class="modal-actions">
-
-            <button
-                id="cancelButton"
-                class="cancel-btn"
-                type="button"
-            >
-                Cancel
-            </button>
-
-            <button
-                id="confirmButton"
-                class="confirm-btn"
-                type="button"
-            >
-                Force Re-register
-            </button>
-
-        </div>
-
-    </div>
-
-</div>
-
-
-<div
-    id="toast"
-    class="toast"
-></div>
-
-
 <script>
 
-const csrfToken =
-    {{ csrf_token|tojson }};
-
 let guests = [];
-let selectedGuest = null;
 let loading = false;
 let currentPage = 1;
 let totalPages = 1;
@@ -757,22 +557,6 @@ const nextPage =
 
 const pageStatus =
     document.getElementById("pageStatus");
-
-const modalBackdrop =
-    document.getElementById("modalBackdrop");
-
-const modalUser =
-    document.getElementById("modalUser");
-
-const cancelButton =
-    document.getElementById("cancelButton");
-
-const confirmButton =
-    document.getElementById("confirmButton");
-
-const toast =
-    document.getElementById("toast");
-
 
 function escapeHtml(value) {
 
@@ -840,7 +624,7 @@ function renderGuests() {
         guestRows.innerHTML = `
             <tr>
                 <td
-                    colspan="7"
+                    colspan="6"
                     class="empty"
                 >
                     No matching guests.
@@ -855,20 +639,6 @@ function renderGuests() {
     guestRows.innerHTML =
         guests.map(
             guest => {
-
-                const action =
-                    guest.status === "active"
-                    ? `
-                        <button
-                            type="button"
-                            class="force-btn"
-                            data-id="${guest.id}"
-                        >
-                            Force Re-register
-                        </button>
-                    `
-                    : "—";
-
 
                 return `
                     <tr>
@@ -907,35 +677,12 @@ function renderGuests() {
                             )}
                         </td>
 
-                        <td>
-                            ${action}
-                        </td>
-
                     </tr>
                 `;
             }
         ).join("");
 
 
-    document
-        .querySelectorAll(".force-btn")
-        .forEach(
-            button => {
-
-                button.addEventListener(
-                    "click",
-                    () => {
-
-                        const id =
-                            Number(
-                                button.dataset.id
-                            );
-
-                        openModal(id);
-                    }
-                );
-            }
-        );
 }
 
 
@@ -1041,150 +788,6 @@ async function loadGuests() {
 }
 
 
-function openModal(id) {
-
-    selectedGuest =
-        guests.find(
-            guest => guest.id === id
-        );
-
-    if (!selectedGuest) {
-        return;
-    }
-
-    modalUser.textContent =
-        selectedGuest.name
-        + " — "
-        + selectedGuest.phone;
-
-    modalBackdrop.classList.add(
-        "show"
-    );
-}
-
-
-function closeModal() {
-
-    if (
-        confirmButton.disabled
-    ) {
-        return;
-    }
-
-    modalBackdrop.classList.remove(
-        "show"
-    );
-
-    selectedGuest = null;
-}
-
-
-function showToast(
-    message,
-    type
-) {
-
-    toast.textContent = message;
-
-    toast.className =
-        "toast "
-        + type
-        + " show";
-
-    setTimeout(
-        () => {
-            toast.className =
-                "toast";
-        },
-        3200
-    );
-}
-
-
-async function revokeSelectedGuest() {
-
-    if (!selectedGuest) {
-        return;
-    }
-
-    confirmButton.disabled = true;
-    confirmButton.textContent =
-        "Disconnecting…";
-
-    try {
-
-        const response =
-            await fetch(
-                "/staff/api/revoke/"
-                + selectedGuest.id,
-                {
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-                        csrf_token:
-                            csrfToken
-                    })
-                }
-            );
-
-        if (response.status === 401) {
-
-            window.location =
-                "/staff/login";
-
-            return;
-        }
-
-        const data =
-            await response.json();
-
-        if (!data.ok) {
-
-            throw new Error(
-                data.error
-                || "Unable to revoke access."
-            );
-        }
-
-        modalBackdrop.classList.remove(
-            "show"
-        );
-
-        showToast(
-            data.message,
-            "success"
-        );
-
-        await loadGuests();
-
-    }
-
-    catch (error) {
-
-        showToast(
-            error.message,
-            "error"
-        );
-
-    }
-
-    finally {
-
-        confirmButton.disabled = false;
-
-        confirmButton.textContent =
-            "Force Re-register";
-
-        selectedGuest = null;
-    }
-}
-
-
 searchInput.addEventListener(
     "input",
     () => {
@@ -1226,45 +829,6 @@ nextPage.addEventListener(
         if (currentPage < totalPages) {
             currentPage += 1;
             loadGuests();
-        }
-    }
-);
-
-
-cancelButton.addEventListener(
-    "click",
-    closeModal
-);
-
-
-confirmButton.addEventListener(
-    "click",
-    revokeSelectedGuest
-);
-
-
-modalBackdrop.addEventListener(
-    "click",
-    event => {
-
-        if (
-            event.target
-            === modalBackdrop
-        ) {
-            closeModal();
-        }
-    }
-);
-
-
-document.addEventListener(
-    "keydown",
-    event => {
-
-        if (
-            event.key === "Escape"
-        ) {
-            closeModal();
         }
     }
 );
