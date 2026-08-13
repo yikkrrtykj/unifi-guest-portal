@@ -4,7 +4,7 @@ External captive portal and guest access management for a self-hosted UniFi Netw
 
 This project provides:
 
-- Guest captive portal with an **Access Code**
+- Guest captive portal after WPA2/WPA3 WiFi authentication
 - Guest **Name** collection
 - **Mobile Number / Passport Number** collection
 - Client MAC, AP MAC and SSID capture from UniFi redirect parameters
@@ -40,7 +40,7 @@ Nginx :80
 
 ## Important security note
 
-The repository intentionally does **not** contain any real usernames, passwords, access codes, secrets, guest records, phone numbers or passport numbers.
+The repository intentionally does **not** contain any real usernames, passwords, WiFi keys, secrets, guest records, phone numbers or passport numbers.
 
 Do not commit:
 
@@ -53,7 +53,7 @@ Do not commit:
 
 These are already covered by `.gitignore` where applicable.
 
-The services fail closed when required administrator usernames or passwords are blank. Guest access-code failures and staff sign-in failures are rate-limited through hashed identifiers stored in SQLite; raw rate-limit IP, MAC and username identifiers are not stored.
+The services fail closed when required administrator usernames or passwords are blank. Administrator and staff sign-in failures are rate-limited through hashed identifiers stored in SQLite; raw rate-limit IP and username identifiers are not stored.
 
 Because the system can collect mobile or passport information, use HTTPS before production deployment and restrict the staff dashboard to trusted staff/police networks where possible.
 
@@ -117,9 +117,6 @@ ADMIN_PASSWORD=
 STAFF_USER=
 STAFF_PASSWORD=
 
-# Code users enter on the guest portal
-PORTAL_ACCESS_CODE=
-
 # Random signing/session secret
 PORTAL_SECRET=
 
@@ -134,9 +131,6 @@ UNIFI_VERIFY_TLS=false
 AUTH_MINUTES=480
 
 # Brute-force protection (seconds except *_MAX_FAILURES)
-ACCESS_CODE_MAX_FAILURES=5
-ACCESS_CODE_WINDOW_SECONDS=600
-ACCESS_CODE_BLOCK_SECONDS=900
 ADMIN_LOGIN_MAX_FAILURES=5
 ADMIN_LOGIN_WINDOW_SECONDS=600
 ADMIN_LOGIN_BLOCK_SECONDS=900
@@ -166,7 +160,6 @@ You must fill in:
 - `ADMIN_PASSWORD`
 - `STAFF_USER`
 - `STAFF_PASSWORD`
-- `PORTAL_ACCESS_CODE`
 - `PORTAL_SECRET`
 - `UNIFI_URL`
 - `UNIFI_USERNAME`
@@ -254,13 +247,12 @@ Expected result:
 The intended guest flow is:
 
 ```text
-Connect to open Hotspot SSID
+Connect to WPA2/WPA3 Hotspot SSID
         |
         v
 UniFi opens captive portal
         |
         v
-Access Code
 Name
 Mobile Number / Passport Number
         |

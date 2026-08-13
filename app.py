@@ -82,27 +82,6 @@ AUTH_MINUTES = int(
     )
 )
 
-ACCESS_CODE_MAX_FAILURES = int(
-    os.environ.get(
-        "ACCESS_CODE_MAX_FAILURES",
-        "5"
-    )
-)
-
-ACCESS_CODE_WINDOW_SECONDS = int(
-    os.environ.get(
-        "ACCESS_CODE_WINDOW_SECONDS",
-        "600"
-    )
-)
-
-ACCESS_CODE_BLOCK_SECONDS = int(
-    os.environ.get(
-        "ACCESS_CODE_BLOCK_SECONDS",
-        "900"
-    )
-)
-
 ADMIN_LOGIN_MAX_FAILURES = int(
     os.environ.get(
         "ADMIN_LOGIN_MAX_FAILURES",
@@ -124,15 +103,6 @@ ADMIN_LOGIN_BLOCK_SECONDS = int(
     )
 )
 
-PORTAL_ACCESS_CODE = os.environ.get(
-    "PORTAL_ACCESS_CODE",
-    ""
-)
-
-if not PORTAL_ACCESS_CODE:
-    raise RuntimeError(
-        "PORTAL_ACCESS_CODE is not configured"
-    )
 PORTAL_SECRET = os.environ.get(
     "PORTAL_SECRET",
     ""
@@ -153,11 +123,13 @@ if not ADMIN_PASSWORD.strip():
         "ADMIN_PASSWORD is not configured"
     )
 
+if AUTH_MINUTES < 1:
+    raise RuntimeError(
+        "AUTH_MINUTES must be a positive integer"
+    )
+
 if (
-    ACCESS_CODE_MAX_FAILURES < 1
-    or ACCESS_CODE_WINDOW_SECONDS < 1
-    or ACCESS_CODE_BLOCK_SECONDS < 1
-    or ADMIN_LOGIN_MAX_FAILURES < 1
+    ADMIN_LOGIN_MAX_FAILURES < 1
     or ADMIN_LOGIN_WINDOW_SECONDS < 1
     or ADMIN_LOGIN_BLOCK_SECONDS < 1
 ):
@@ -590,50 +562,6 @@ def client_ip():
     )
 
 
-def access_code_limit_keys(client_mac):
-    return (
-        rate_limit_key(
-            PORTAL_SECRET,
-            "guest-ip",
-            client_ip()
-        ),
-        rate_limit_key(
-            PORTAL_SECRET,
-            "guest-mac",
-            client_mac
-        ),
-    )
-
-
-def access_code_retry_after(client_mac):
-    return retry_after(
-        DB_PATH,
-        access_code_limit_keys(client_mac)
-    )
-
-
-def record_access_code_failure(client_mac):
-    waits = [
-        record_failure(
-            DB_PATH,
-            key,
-            ACCESS_CODE_MAX_FAILURES,
-            ACCESS_CODE_WINDOW_SECONDS,
-            ACCESS_CODE_BLOCK_SECONDS,
-        )
-        for key in access_code_limit_keys(client_mac)
-    ]
-
-    return max(waits)
-
-
-def clear_access_code_failures(client_mac):
-    clear_failures(
-        DB_PATH,
-        access_code_limit_keys(client_mac)
-    )
-
-
 def admin_login_limit_keys(username):
     return (
         rate_limit_key(
@@ -937,11 +865,6 @@ def handle_portal(site):
                 "access. Please try again."
             )
         ), 503
-    access_code = (
-        request.form
-        .get("access_code", "")
-        .strip()
-    )
     name = (
         request.form
         .get("name", "")
@@ -952,62 +875,6 @@ def handle_portal(site):
         request.form
         .get("phone", "")
         .strip()
-    )
-
-    wait_seconds = access_code_retry_after(
-        client_mac
-    )
-
-    if wait_seconds:
-        return render_template(
-            "index.html",
-            portal_token=token,
-            name=name,
-            phone=phone,
-            error=(
-                "Too many incorrect access code "
-                "attempts. Please wait before "
-                "trying again."
-            )
-        ), 429, {
-            "Retry-After": str(wait_seconds)
-        }
-
-    if not secrets.compare_digest(
-        access_code,
-        PORTAL_ACCESS_CODE
-    ):
-        wait_seconds = (
-            record_access_code_failure(
-                client_mac
-            )
-        )
-
-        error = "Incorrect access code."
-
-        if wait_seconds:
-            error = (
-                "Too many incorrect access code "
-                "attempts. Please wait before "
-                "trying again."
-            )
-
-        return render_template(
-            "index.html",
-            portal_token=token,
-            name=name,
-            phone=phone,
-            error=error
-        ), (429 if wait_seconds else 400), (
-            {
-                "Retry-After": str(wait_seconds)
-            }
-            if wait_seconds
-            else {}
-        )
-
-    clear_access_code_failures(
-        client_mac
     )
 
     if not valid_name(name):

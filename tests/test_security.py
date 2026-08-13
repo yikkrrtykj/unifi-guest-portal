@@ -27,13 +27,9 @@ class SecurityTests(unittest.TestCase):
             "ADMIN_PASSWORD": "admin-password",
             "STAFF_USER": "staff",
             "STAFF_PASSWORD": "staff-password",
-            "PORTAL_ACCESS_CODE": "correct-code",
             "PORTAL_SECRET": "test-secret-for-automated-tests",
             "UNIFI_USERNAME": "unifi-user",
             "UNIFI_PASSWORD": "unifi-password",
-            "ACCESS_CODE_MAX_FAILURES": "5",
-            "ACCESS_CODE_WINDOW_SECONDS": "600",
-            "ACCESS_CODE_BLOCK_SECONDS": "900",
             "STAFF_LOGIN_MAX_FAILURES": "5",
             "STAFF_LOGIN_WINDOW_SECONDS": "600",
             "STAFF_LOGIN_BLOCK_SECONDS": "900",
@@ -111,6 +107,28 @@ class SecurityTests(unittest.TestCase):
             result.stderr,
         )
 
+    def test_portal_rejects_non_positive_authorization_time(self):
+        script = "import app"
+        env = os.environ.copy()
+        env["AUTH_MINUTES"] = "0"
+
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "AUTH_MINUTES must be a positive integer",
+            result.stderr,
+        )
+
     def test_staff_fails_closed_without_staff_user(self):
         result = self.import_fails_without(
             "staff_app",
@@ -135,7 +153,7 @@ class SecurityTests(unittest.TestCase):
             result.stderr,
         )
 
-    def portal_post(self, mac, access_code):
+    def portal_post(self, mac):
         token = self.portal.portal_payload(
             "default",
             mac,
@@ -148,7 +166,6 @@ class SecurityTests(unittest.TestCase):
             "/guest/s/default/",
             data={
                 "portal_token": token,
-                "access_code": access_code,
                 "name": "Test Guest",
                 "phone": "T1234567",
             },
@@ -157,20 +174,15 @@ class SecurityTests(unittest.TestCase):
             },
         )
 
-    def test_guest_access_code_is_rate_limited(self):
-        mac = "02:00:00:00:00:11"
-
-        for _ in range(4):
-            response = self.portal_post(mac, "wrong-code")
-            self.assertEqual(response.status_code, 400)
-
-        response = self.portal_post(mac, "wrong-code")
-
-        self.assertEqual(response.status_code, 429)
-        self.assertGreater(
-            int(response.headers["Retry-After"]),
-            0,
+    def test_guest_form_does_not_request_access_code(self):
+        response = self.portal.app.test_client().get(
+            "/guest/s/default/"
+            "?id=02%3A00%3A00%3A00%3A00%3A11"
         )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Access Code", response.data)
+        self.assertNotIn(b'name="access_code"', response.data)
 
     def test_staff_login_is_rate_limited(self):
         client = self.staff.app.test_client()
@@ -213,10 +225,7 @@ class SecurityTests(unittest.TestCase):
             "authorize_guest",
             return_value=(True, None),
         ):
-            response = self.portal_post(
-                mac,
-                "correct-code",
-            )
+            response = self.portal_post(mac)
 
         self.assertEqual(response.status_code, 200)
 
@@ -459,10 +468,7 @@ class SecurityTests(unittest.TestCase):
             self.portal,
             "authorize_guest",
         ) as authorize:
-            response = self.portal_post(
-                mac,
-                "correct-code",
-            )
+            response = self.portal_post(mac)
 
         self.assertEqual(response.status_code, 409)
         authorize.assert_not_called()
@@ -601,10 +607,7 @@ class SecurityTests(unittest.TestCase):
             "authorize_guest",
             return_value=(False, "test failure"),
         ):
-            response = self.portal_post(
-                mac,
-                "correct-code",
-            )
+            response = self.portal_post(mac)
 
         self.assertEqual(response.status_code, 503)
 
@@ -670,10 +673,7 @@ class SecurityTests(unittest.TestCase):
                 side_effect=get_db_with_failure,
             ),
         ):
-            response = self.portal_post(
-                mac,
-                "correct-code",
-            )
+            response = self.portal_post(mac)
 
         self.assertEqual(response.status_code, 503)
         revoke.assert_called_once_with(mac, "default")
@@ -744,10 +744,7 @@ class SecurityTests(unittest.TestCase):
                 side_effect=get_db_with_failure,
             ),
         ):
-            response = self.portal_post(
-                mac,
-                "correct-code",
-            )
+            response = self.portal_post(mac)
 
         self.assertEqual(response.status_code, 503)
         revoke.assert_called_once_with(mac, "default")
