@@ -144,6 +144,7 @@ DASHBOARD_PAGE_SIZE=50
 # Leave false while testing with HTTP.
 # Change to true after HTTPS is enabled.
 STAFF_COOKIE_SECURE=false
+ADMIN_COOKIE_SECURE=false
 ```
 
 Generate a strong `PORTAL_SECRET`:
@@ -344,7 +345,7 @@ The dashboard shows:
 - Current portal status
 - Force Re-register action
 
-The dashboard provides server-side search, status filtering and pagination, and refreshes the current page automatically. Operational system status and the staff-action audit are intentionally omitted from `/staff/`; they are available only on the internal `/admin` page protected by `ADMIN_USER` and `ADMIN_PASSWORD`.
+The dashboard provides server-side search, status filtering and pagination, and refreshes the current page automatically. Operational system status and the staff-action audit are intentionally omitted from `/staff/`; they are available only after signing in to the internal `/admin` page with `ADMIN_USER` and `ADMIN_PASSWORD`. The admin page does not duplicate the guest visitor list.
 
 ## Updating an existing server
 
@@ -456,12 +457,13 @@ Before production, especially when collecting mobile/passport data:
 - use a DNS name for the portal
 - enable HTTPS
 - set `STAFF_COOKIE_SECURE=true`
+- set `ADMIN_COOKIE_SECURE=true`
 - restrict `/staff/` to a trusted staff/police network where possible
 - avoid exposing the staff dashboard to the guest VLAN
 
 ### When no certificate is available yet
 
-Plain HTTP can remain enabled for isolated internal testing. Keep `STAFF_COOKIE_SECURE=false` until HTTPS is actually enabled.
+Plain HTTP can remain enabled for isolated internal testing. Keep `STAFF_COOKIE_SECURE=false` and `ADMIN_COOKIE_SECURE=false` until HTTPS is actually enabled.
 
 For production, a certificate requires a stable DNS name. The preferred options are:
 

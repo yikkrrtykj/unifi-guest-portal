@@ -2,249 +2,329 @@
 <html lang="en">
 
 <head>
-
 <meta charset="UTF-8">
-
 <meta name="viewport"
       content="width=device-width, initial-scale=1.0">
 
-<title>Guest WiFi Admin</title>
+<title>Portal Administration</title>
 
 <style>
+* {
+    box-sizing: border-box;
+}
+
 body {
-    font-family: -apple-system,
-                 BlinkMacSystemFont,
-                 "Segoe UI",
-                 Arial,
-                 sans-serif;
-    margin: 30px;
-    background: #f5f6f8;
-    color: #202124;
+    margin: 0;
+    min-height: 100vh;
+    color: #172033;
+    background: #f3f5f9;
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Arial,
+        sans-serif;
+}
+
+.topbar {
+    height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 42px;
+    color: #fff;
+    background: linear-gradient(100deg, #160b31, #311256);
+    box-shadow: 0 6px 24px rgba(19,8,44,.18);
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 750;
+    letter-spacing: .04em;
+}
+
+.brand-mark {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border-radius: 11px;
+    background: linear-gradient(135deg, #8c5cf4, #d45fae);
+}
+
+.user-area {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    color: #cfc7dc;
+    font-size: 14px;
+}
+
+.logout {
+    height: 38px;
+    padding: 0 16px;
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 10px;
+    color: #fff;
+    background: rgba(255,255,255,.08);
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.container {
+    width: min(1220px, calc(100% - 48px));
+    margin: 42px auto 60px;
+}
+
+.page-head {
+    margin-bottom: 25px;
+}
+
+h1,
+h2 {
+    margin: 0;
+}
+
+h1 {
+    font-size: 31px;
+    letter-spacing: -.025em;
+}
+
+.page-head p,
+.section-head p {
+    margin: 8px 0 0;
+    color: #6f7788;
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 15px;
+}
+
+.status-card {
+    min-height: 124px;
+    padding: 21px;
+    border: 1px solid #e7e9ef;
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 8px 28px rgba(29,39,62,.06);
+}
+
+.status-label {
+    margin-bottom: 19px;
+    color: #71798a;
+    font-size: 14px;
+}
+
+.status-value {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 18px;
+    font-weight: 750;
+}
+
+.status-value::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 4px currentColor;
+    opacity: .85;
+}
+
+.ok {
+    color: #147a43;
+}
+
+.warning {
+    color: #bd2a24;
+}
+
+.section {
+    margin-top: 35px;
+}
+
+.section-head {
+    margin-bottom: 16px;
+}
+
+.section-head h2 {
+    font-size: 23px;
 }
 
 .table-wrap {
     overflow-x: auto;
+    border: 1px solid #e7e9ef;
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 8px 28px rgba(29,39,62,.05);
 }
 
 table {
     width: 100%;
     border-collapse: collapse;
-    background: #ffffff;
 }
 
 th,
 td {
-    padding: 11px 12px;
-    border-bottom: 1px solid #eee;
+    padding: 16px 18px;
+    border-bottom: 1px solid #eceef3;
     text-align: left;
     white-space: nowrap;
 }
 
 th {
-    background: #f0f2f5;
-}
-
-.yes {
-    font-weight: 600;
-}
-
-h1 {
-    margin-bottom: 8px;
-}
-
-.count {
-    color: #666;
-    margin-bottom: 20px;
-}
-
-.section {
-    margin-top: 34px;
-}
-
-.status-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(150px, 1fr));
-    gap: 14px;
-}
-
-.status-card {
-    padding: 16px;
-    border-radius: 12px;
-    background: #ffffff;
-    box-shadow: 0 3px 14px rgba(0,0,0,.05);
-}
-
-.status-label {
-    color: #666;
+    color: #626b7d;
+    background: #fafbfc;
     font-size: 13px;
-    margin-bottom: 7px;
+    letter-spacing: .02em;
 }
 
-.status-value {
-    font-weight: 700;
+td {
+    font-size: 14px;
 }
 
-.ok {
-    color: #176b37;
-}
-
-.warning {
-    color: #b42318;
+tbody tr:last-child td {
+    border-bottom: 0;
 }
 
 .result {
+    min-width: 310px;
     white-space: normal;
-    min-width: 280px;
+    line-height: 1.45;
 }
 
-@media (max-width: 800px) {
-    body {
-        margin: 18px;
-    }
+.empty {
+    padding: 38px;
+    color: #7a8291;
+    text-align: center;
+}
 
+@media (max-width: 900px) {
     .status-grid {
         grid-template-columns: 1fr 1fr;
     }
 }
-</style>
 
+@media (max-width: 560px) {
+    .topbar {
+        padding: 0 18px;
+    }
+
+    .user-area span {
+        display: none;
+    }
+
+    .container {
+        width: calc(100% - 28px);
+        margin-top: 28px;
+    }
+
+    .status-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
 </head>
 
 <body>
 
-<h1>Guest WiFi Visitors</h1>
-
-<div class="count">
-    Recent records: {{ rows|length }}
-</div>
-
-<div class="table-wrap">
-
-<table>
-
-<thead>
-
-<tr>
-    <th>ID</th>
-    <th>Name</th>
-    <th>Mobile / Passport</th>
-    <th>Client MAC</th>
-    <th>SSID</th>
-    <th>AP MAC</th>
-    <th>Client IP</th>
-    <th>Authorized</th>
-    <th>Authorized At</th>
-    <th>Expires At</th>
-</tr>
-
-</thead>
-
-<tbody>
-
-{% for row in rows %}
-
-<tr>
-    <td>{{ row.id }}</td>
-    <td>{{ row.name }}</td>
-    <td>{{ row.phone }}</td>
-    <td>{{ row.client_mac }}</td>
-    <td>{{ row.ssid }}</td>
-    <td>{{ row.ap_mac }}</td>
-    <td>{{ row.remote_ip }}</td>
-
-    <td class="yes">
-        {% if row.authorized %}
-        Yes
-        {% else %}
-        No
-        {% endif %}
-    </td>
-
-    <td>
-        {{ row.authorized_at or '' }}
-    </td>
-
-    <td>
-        {{ row.expires_at or '' }}
-    </td>
-
-</tr>
-
-{% endfor %}
-
-</tbody>
-
-</table>
-
-</div>
-
-<section class="section">
-
-<h2>System Status</h2>
-
-<div class="status-grid">
-    <div class="status-card">
-        <div class="status-label">Portal</div>
-        <div class="status-value ok">Available</div>
+<header class="topbar">
+    <div class="brand">
+        <div class="brand-mark">A</div>
+        <span>Portal Admin</span>
     </div>
 
-    <div class="status-card">
-        <div class="status-label">Database</div>
-        <div class="status-value ok">Available</div>
+    <div class="user-area">
+        <span>{{ admin_user }}</span>
+        <form method="post" action="/admin/logout">
+            <button class="logout" type="submit">Sign Out</button>
+        </form>
+    </div>
+</header>
+
+<main class="container">
+    <div class="page-head">
+        <h1>Operations Overview</h1>
+        <p>Private system health and staff activity.</p>
     </div>
 
-    <div class="status-card">
-        <div class="status-label">UniFi Controller</div>
-        <div class="status-value {{ 'ok' if unifi_ok else 'warning' }}">
-            {{ unifi_message }}
+    <section aria-labelledby="status-title">
+        <div class="section-head">
+            <h2 id="status-title">System Status</h2>
+            <p>Current portal environment status.</p>
         </div>
-    </div>
 
-    <div class="status-card">
-        <div class="status-label">Browser Transport</div>
-        <div class="status-value {{ 'ok' if transport == 'https' else 'warning' }}">
-            {{ 'HTTPS' if transport == 'https' else 'HTTP (internal testing)' }}
+        <div class="status-grid">
+            <div class="status-card">
+                <div class="status-label">Portal</div>
+                <div class="status-value ok">Available</div>
+            </div>
+
+            <div class="status-card">
+                <div class="status-label">Database</div>
+                <div class="status-value ok">Available</div>
+            </div>
+
+            <div class="status-card">
+                <div class="status-label">UniFi Controller</div>
+                <div class="status-value {{ 'ok' if unifi_ok else 'warning' }}">
+                    {{ unifi_message }}
+                </div>
+            </div>
+
+            <div class="status-card">
+                <div class="status-label">Browser Transport</div>
+                <div class="status-value {{ 'ok' if transport == 'https' else 'warning' }}">
+                    {{ 'HTTPS' if transport == 'https' else 'HTTP (internal testing)' }}
+                </div>
+            </div>
         </div>
-    </div>
-</div>
+    </section>
 
-</section>
+    <section class="section" aria-labelledby="actions-title">
+        <div class="section-head">
+            <h2 id="actions-title">Recent Staff Actions</h2>
+            <p>Latest force re-registration results.</p>
+        </div>
 
-<section class="section">
-
-<h2>Recent Staff Actions</h2>
-
-<div class="table-wrap">
-<table>
-<thead>
-<tr>
-    <th>Time</th>
-    <th>Actor</th>
-    <th>Action</th>
-    <th>Client MAC</th>
-    <th>Result</th>
-</tr>
-</thead>
-<tbody>
-{% for action in actions %}
-<tr>
-    <td>{{ action.created_at }}</td>
-    <td>{{ action.actor }}</td>
-    <td>{{ action.action }}</td>
-    <td>{{ action.client_mac or '' }}</td>
-    <td class="result">{{ action.result or '' }}</td>
-</tr>
-{% else %}
-<tr>
-    <td colspan="5">No staff actions recorded.</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-</div>
-
-</section>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Client MAC</th>
+                    <th>Result</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for action in actions %}
+                <tr>
+                    <td>{{ action.created_at }}</td>
+                    <td>{{ action.actor }}</td>
+                    <td>{{ action.action }}</td>
+                    <td>{{ action.client_mac or '' }}</td>
+                    <td class="result">{{ action.result or '' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" class="empty">
+                        No staff actions recorded.
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
 
 </body>
-
 </html>

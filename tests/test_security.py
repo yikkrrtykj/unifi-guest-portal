@@ -1,5 +1,4 @@
 import importlib
-import base64
 import os
 import sqlite3
 import sys
@@ -426,28 +425,28 @@ class SecurityTests(unittest.TestCase):
         self.assertIn("staff_actions", tables)
         self.assertIn("auth_rate_limits", tables)
 
-    def test_admin_basic_auth_is_rate_limited(self):
+    def test_admin_form_login_is_rate_limited(self):
         client = self.portal.app.test_client()
-        credentials = base64.b64encode(
-            b"admin:wrong-password"
-        ).decode("ascii")
-        headers = {
-            "Authorization": f"Basic {credentials}"
-        }
 
         for _ in range(4):
-            response = client.get(
-                "/admin",
-                headers=headers,
+            response = client.post(
+                "/admin/login",
+                data={
+                    "username": "admin",
+                    "password": "wrong-password",
+                },
                 environ_base={
                     "REMOTE_ADDR": "192.0.2.30",
                 },
             )
-            self.assertEqual(response.status_code, 401)
+            self.assertEqual(response.status_code, 200)
 
-        response = client.get(
-            "/admin",
-            headers=headers,
+        response = client.post(
+            "/admin/login",
+            data={
+                "username": "admin",
+                "password": "wrong-password",
+            },
             environ_base={
                 "REMOTE_ADDR": "192.0.2.30",
             },
@@ -461,27 +460,53 @@ class SecurityTests(unittest.TestCase):
 
     def test_admin_dashboard_exposes_private_sections(self):
         client = self.portal.app.test_client()
-        credentials = base64.b64encode(
-            b"admin:admin-password"
-        ).decode("ascii")
+
+        response = client.get("/admin")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                "/admin/login"
+            )
+        )
+
+        response = client.get("/admin/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Welcome back", response.data)
+
+        response = client.post(
+            "/admin/login",
+            data={
+                "username": "admin",
+                "password": "admin-password",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                "/admin"
+            )
+        )
 
         with mock.patch.object(
             self.portal,
             "unifi_connection_status",
             return_value=(True, "Connected"),
         ):
-            response = client.get(
-                "/admin",
-                headers={
-                    "Authorization": (
-                        f"Basic {credentials}"
-                    )
-                },
-            )
+            response = client.get("/admin")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"System Status", response.data)
         self.assertIn(b"Recent Staff Actions", response.data)
+        self.assertNotIn(b"Guest WiFi Visitors", response.data)
+        self.assertNotIn(b"Mobile / Passport", response.data)
+
+        response = client.post("/admin/logout")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                "/admin/login"
+            )
+        )
 
     def test_guest_responses_include_security_headers(self):
         response = self.portal.app.test_client().get(

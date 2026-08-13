@@ -13,7 +13,9 @@ from flask import (
     Flask,
     request,
     render_template,
-    Response
+    redirect,
+    url_for,
+    session,
 )
 
 from itsdangerous import (
@@ -111,6 +113,13 @@ ADMIN_LOGIN_BLOCK_SECONDS = int(
     )
 )
 
+ADMIN_COOKIE_SECURE = (
+    os.environ.get(
+        "ADMIN_COOKIE_SECURE",
+        "false"
+    ).lower() == "true"
+)
+
 PORTAL_SECRET = os.environ.get(
     "PORTAL_SECRET",
     ""
@@ -140,6 +149,17 @@ if (
         "Authentication rate-limit values "
         "must be positive integers"
     )
+
+
+app.secret_key = PORTAL_SECRET
+
+app.config.update(
+    SESSION_COOKIE_NAME="unifi_portal_admin",
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=ADMIN_COOKIE_SECURE,
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+)
 
 
 serializer = URLSafeTimedSerializer(
@@ -323,36 +343,9 @@ def init_db():
 init_db()
 
 
-def check_admin():
-    auth = request.authorization
-
-    if not auth:
-        return False
-
-    if not ADMIN_USER or not ADMIN_PASSWORD:
-        return False
-
-    return (
-        secrets.compare_digest(
-            auth.username or "",
-            ADMIN_USER
-        )
-        and
-        secrets.compare_digest(
-            auth.password or "",
-            ADMIN_PASSWORD
-        )
-    )
-
-
-def unauthorized():
-    return Response(
-        "Authentication required",
-        401,
-        {
-            "WWW-Authenticate":
-            'Basic realm="Guest WiFi Admin"'
-        }
+def admin_logged_in():
+    return bool(
+        session.get("admin_user")
     )
 
 
@@ -1354,56 +1347,122 @@ def health():
     }
 
 
-@app.route("/admin")
-def admin():
-    auth = request.authorization
-    username = (
-        auth.username
-        if auth
-        else ""
-    )
-
-    wait_seconds = admin_login_retry_after(
-        username
-    )
-
-    if wait_seconds:
-        return Response(
-            "Too many authentication attempts. "
-            "Please wait before trying again.",
-            429,
-            {
-                "Retry-After": str(wait_seconds)
-            }
+@app.route(
+    "/admin/login",
+    methods=["GET", "POST"]
+)
+def admin_login():
+    if admin_logged_in():
+        return redirect(
+            url_for("admin")
         )
 
-    if not check_admin():
+    error = ""
+
+    if request.method == "POST":
+        username = (
+            request.form
+            .get("username", "")
+            .strip()
+        )
+        password = request.form.get(
+            "password",
+            ""
+        )
+        wait_seconds = admin_login_retry_after(
+            username
+        )
+
+        if wait_seconds:
+            return render_template(
+                "admin_login.html",
+                error=(
+                    "Too many sign-in attempts. "
+                    "Please wait before trying again."
+                )
+            ), 429, {
+                "Retry-After": str(wait_seconds)
+            }
+
+        valid = (
+            secrets.compare_digest(
+                username,
+                ADMIN_USER
+            )
+            and
+            secrets.compare_digest(
+                password,
+                ADMIN_PASSWORD
+            )
+        )
+
+        if valid:
+            clear_admin_login_failures(
+                username
+            )
+            session.clear()
+            session.permanent = True
+            session["admin_user"] = username
+
+            app.logger.info(
+                "ADMIN_LOGIN_SUCCESS user=%s ip=%s",
+                username,
+                client_ip()
+            )
+
+            return redirect(
+                url_for("admin")
+            )
+
+        app.logger.warning(
+            "ADMIN_LOGIN_FAILED user=%s ip=%s",
+            username,
+            client_ip()
+        )
+
         wait_seconds = record_admin_login_failure(
             username
         )
 
         if wait_seconds:
-            return Response(
-                "Too many authentication attempts. "
-                "Please wait before trying again.",
-                429,
-                {
-                    "Retry-After": str(wait_seconds)
-                }
-            )
+            return render_template(
+                "admin_login.html",
+                error=(
+                    "Too many sign-in attempts. "
+                    "Please wait before trying again."
+                )
+            ), 429, {
+                "Retry-After": str(wait_seconds)
+            }
 
-        return unauthorized()
+        error = "Incorrect username or password."
 
-    clear_admin_login_failures(username)
+    return render_template(
+        "admin_login.html",
+        error=error
+    )
+
+
+@app.route(
+    "/admin/logout",
+    methods=["POST"]
+)
+def admin_logout():
+    session.clear()
+
+    return redirect(
+        url_for("admin_login")
+    )
+
+
+@app.route("/admin")
+def admin():
+    if not admin_logged_in():
+        return redirect(
+            url_for("admin_login")
+        )
 
     conn = get_db()
-
-    rows = conn.execute("""
-        SELECT *
-        FROM guests
-        ORDER BY id DESC
-        LIMIT 500
-    """).fetchall()
 
     actions = conn.execute("""
         SELECT *
@@ -1425,11 +1484,11 @@ def admin():
 
     return render_template(
         "admin.html",
-        rows=rows,
         actions=actions,
         unifi_ok=unifi_ok,
         unifi_message=unifi_message,
-        transport=transport
+        transport=transport,
+        admin_user=session["admin_user"]
     )
 
 
