@@ -1,0 +1,12 @@
+[Unit]
+Description=Disconnect expired UniFi guest clients
+After=network-online.target unifi-portal.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/unifi-portal
+EnvironmentFile=/etc/unifi-portal.env
+ExecStart=/opt/unifi-portal/venv/bin/python /opt/unifi-portal/expiry_disconnect.py
+UMask=0077

@@ -13,9 +13,14 @@ DB_PATH="/opt/unifi-portal/portal.db"
 DEPLOY_STARTED=0
 PORTAL_WAS_ACTIVE=0
 STAFF_WAS_ACTIVE=0
+EXPIRY_TIMER_WAS_ACTIVE=0
+EXPIRY_TIMER_WAS_ENABLED=0
+EXPIRY_SERVICE_UNIT="/etc/systemd/system/unifi-portal-expiry.service"
+EXPIRY_TIMER_UNIT="/etc/systemd/system/unifi-portal-expiry.timer"
 
 FILES=(
     app.py
+    expiry_disconnect.py
     staff_app.py
     rate_limit.py
     requirements.txt
@@ -84,6 +89,44 @@ restore_backup() {
     fi
 }
 
+restore_expiry_units() {
+    systemctl disable --now \
+        unifi-portal-expiry.timer \
+        >/dev/null 2>&1 || true
+    systemctl stop \
+        unifi-portal-expiry.service \
+        >/dev/null 2>&1 || true
+
+    rm -f -- \
+        "$EXPIRY_SERVICE_UNIT" \
+        "$EXPIRY_TIMER_UNIT"
+
+    if [ -f "$BACKUP_DIR/systemd/unifi-portal-expiry.service" ]; then
+        cp -a \
+            "$BACKUP_DIR/systemd/unifi-portal-expiry.service" \
+            "$EXPIRY_SERVICE_UNIT"
+    fi
+
+    if [ -f "$BACKUP_DIR/systemd/unifi-portal-expiry.timer" ]; then
+        cp -a \
+            "$BACKUP_DIR/systemd/unifi-portal-expiry.timer" \
+            "$EXPIRY_TIMER_UNIT"
+    fi
+
+    systemctl daemon-reload
+
+    if [ "$EXPIRY_TIMER_WAS_ENABLED" -eq 1 ]; then
+        systemctl enable \
+            unifi-portal-expiry.timer \
+            >/dev/null
+    fi
+
+    if [ "$EXPIRY_TIMER_WAS_ACTIVE" -eq 1 ]; then
+        systemctl start \
+            unifi-portal-expiry.timer
+    fi
+}
+
 rollback_on_error() {
     local status=$?
 
@@ -95,8 +138,13 @@ rollback_on_error() {
 
     if [ "$DEPLOY_STARTED" -eq 1 ]; then
         echo "Restoring the previous application and database..."
+        systemctl stop \
+            unifi-portal-expiry.timer \
+            unifi-portal-expiry.service \
+            2>/dev/null || true
         systemctl stop unifi-portal unifi-portal-staff 2>/dev/null || true
         restore_backup
+        restore_expiry_units
 
         if [ "$PORTAL_WAS_ACTIVE" -eq 1 ]; then
             systemctl restart unifi-portal
@@ -159,6 +207,14 @@ fi
 
 if service_was_active unifi-portal-staff; then
     STAFF_WAS_ACTIVE=1
+fi
+
+if service_was_active unifi-portal-expiry.timer; then
+    EXPIRY_TIMER_WAS_ACTIVE=1
+fi
+
+if systemctl is-enabled --quiet unifi-portal-expiry.timer 2>/dev/null; then
+    EXPIRY_TIMER_WAS_ENABLED=1
 fi
 
 if [ "$PORTAL_WAS_ACTIVE" -ne 1 ]; then
@@ -277,11 +333,17 @@ echo "Release: $RESOLVED_COMMIT"
 
 echo "=== Validate release ==="
 
+systemd-analyze calendar \
+    '*-*-* 00:01:00 Asia/Shanghai' \
+    >/dev/null
+
 "$APP_DIR/venv/bin/python" -m py_compile \
     "$RELEASE_DIR/source/app.py" \
+    "$RELEASE_DIR/source/expiry_disconnect.py" \
     "$RELEASE_DIR/source/staff_app.py" \
     "$RELEASE_DIR/source/rate_limit.py" \
-    "$RELEASE_DIR/source/tests/test_security.py"
+    "$RELEASE_DIR/source/tests/test_security.py" \
+    "$RELEASE_DIR/source/tests/test_expiry_disconnect.py"
 
 (
     cd "$RELEASE_DIR/source"
@@ -300,7 +362,8 @@ echo "=== Prepare dependencies ==="
 echo "=== Back up current release ==="
 
 install -d -m 0700 \
-    "$BACKUP_DIR/application"
+    "$BACKUP_DIR/application" \
+    "$BACKUP_DIR/systemd"
 
 for item in "${FILES[@]}"; do
     if [ -e "$APP_DIR/$item" ]; then
@@ -335,6 +398,18 @@ PY
     chmod 0600 "$BACKUP_DIR/portal.db"
 fi
 
+if [ -f "$EXPIRY_SERVICE_UNIT" ]; then
+    cp -a \
+        "$EXPIRY_SERVICE_UNIT" \
+        "$BACKUP_DIR/systemd/unifi-portal-expiry.service"
+fi
+
+if [ -f "$EXPIRY_TIMER_UNIT" ]; then
+    cp -a \
+        "$EXPIRY_TIMER_UNIT" \
+        "$BACKUP_DIR/systemd/unifi-portal-expiry.timer"
+fi
+
 echo "Backup: $BACKUP_DIR"
 DEPLOY_STARTED=1
 
@@ -355,6 +430,16 @@ done
 
 printf '%s\n' "$RESOLVED_COMMIT" \
     > "$APP_DIR/.deployed-commit"
+
+install -m 0644 \
+    "$APP_DIR/deploy/unifi-portal-expiry.service" \
+    "$EXPIRY_SERVICE_UNIT"
+
+install -m 0644 \
+    "$APP_DIR/deploy/unifi-portal-expiry.timer" \
+    "$EXPIRY_TIMER_UNIT"
+
+systemctl daemon-reload
 
 echo "=== Start services ==="
 
@@ -383,6 +468,17 @@ HTTP_CODE="$(
 
 test "$HTTP_CODE" = "200"
 
+echo "=== Enable expiry disconnect timer ==="
+
+systemctl enable --now \
+    unifi-portal-expiry.timer \
+    >/dev/null
+
+systemctl is-enabled --quiet \
+    unifi-portal-expiry.timer
+systemctl is-active --quiet \
+    unifi-portal-expiry.timer
+
 DEPLOY_STARTED=0
 
 echo
@@ -394,5 +490,11 @@ echo "unifi-portal: $(systemctl is-active unifi-portal)"
 if [ "$STAFF_WAS_ACTIVE" -eq 1 ]; then
     echo "unifi-portal-staff: $(systemctl is-active unifi-portal-staff)"
 fi
+
+echo "unifi-portal-expiry.timer: $(systemctl is-active unifi-portal-expiry.timer)"
+echo "Next expiry disconnect:"
+systemctl list-timers \
+    unifi-portal-expiry.timer \
+    --no-pager
 
 echo "The SSH session remains open."

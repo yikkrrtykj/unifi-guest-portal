@@ -130,6 +130,9 @@ UNIFI_VERIFY_TLS=false
 # Guests must register again after midnight in this timezone
 AUTH_RESET_TIMEZONE=Asia/Shanghai
 
+# Only recently expired registrations are considered for disconnect
+EXPIRY_DISCONNECT_LOOKBACK_HOURS=24
+
 # Brute-force protection (seconds except *_MAX_FAILURES)
 ADMIN_LOGIN_MAX_FAILURES=5
 ADMIN_LOGIN_WINDOW_SECONDS=600
@@ -217,10 +220,13 @@ Install the services:
 ```bash
 sudo cp deploy/unifi-portal.service /etc/systemd/system/
 sudo cp deploy/unifi-portal-staff.service /etc/systemd/system/
+sudo cp deploy/unifi-portal-expiry.service /etc/systemd/system/
+sudo cp deploy/unifi-portal-expiry.timer /etc/systemd/system/
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now unifi-portal
 sudo systemctl enable --now unifi-portal-staff
+sudo systemctl enable --now unifi-portal-expiry.timer
 ```
 
 Check them:
@@ -228,6 +234,7 @@ Check them:
 ```bash
 systemctl status unifi-portal --no-pager
 systemctl status unifi-portal-staff --no-pager
+systemctl status unifi-portal-expiry.timer --no-pager
 ```
 
 Health checks:
@@ -273,6 +280,8 @@ Internet access
 Each registration remains valid until the next midnight in `AUTH_RESET_TIMEZONE` (default: `Asia/Shanghai`). A guest who registers at 09:00 remains authorized until 00:00 that night; a guest who registers at 23:50 remains authorized until 00:00 ten minutes later. The registration records remain in SQLite after expiration.
 
 Before that midnight, if the same MAC returns to the portal, the application can restore the remaining authorization instead of asking for another registration. After midnight, the device must submit a new registration. UniFi accepts authorization duration in whole minutes, so its network cutoff can be up to 59 seconds after the database expiration boundary.
+
+At 00:01 in `Asia/Shanghai`, `unifi-portal-expiry.timer` checks the latest completed registration for each MAC. It only revokes and disconnects a client when the latest registration is expired and the controller confirms that the device is still associated as a guest on the recorded SSID. Active registrations, offline clients, non-guest clients, and clients on another SSID are not disconnected. Each expired registration is processed at most once. Disconnecting the station encourages phones to repeat captive-portal detection, but the operating system still decides whether to display a portal popup automatically.
 
 New registrations are first stored with a pending state, then authorized through UniFi, and finally marked complete. If final database persistence fails after authorization, the portal attempts an immediate compensating `unauthorize-guest` call and records the registration as failed.
 
@@ -454,6 +463,12 @@ Staff dashboard:
 journalctl -u unifi-portal-staff -f
 ```
 
+Midnight expiry disconnect:
+
+```bash
+journalctl -u unifi-portal-expiry -f
+```
+
 Nginx:
 
 ```bash
@@ -465,9 +480,11 @@ journalctl -u nginx -f
 ```text
 .
 ├── app.py
+├── expiry_disconnect.py
 ├── rate_limit.py
 ├── staff_app.py
 ├── tests/
+│   ├── test_expiry_disconnect.py
 │   └── test_security.py
 ├── templates/
 │   ├── index.html
@@ -479,6 +496,8 @@ journalctl -u nginx -f
 ├── deploy/
 │   ├── nginx.conf
 │   ├── update.sh
+│   ├── unifi-portal-expiry.service
+│   ├── unifi-portal-expiry.timer
 │   ├── unifi-portal.service
 │   └── unifi-portal-staff.service
 ├── .env.example

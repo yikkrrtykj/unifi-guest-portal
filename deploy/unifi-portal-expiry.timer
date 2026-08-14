@@ -1,0 +1,12 @@
+[Unit]
+Description=Disconnect expired UniFi guests after Shanghai midnight
+
+[Timer]
+OnCalendar=*-*-* 00:01:00 Asia/Shanghai
+Persistent=true
+AccuracySec=30s
+RandomizedDelaySec=0
+Unit=unifi-portal-expiry.service
+
+[Install]
+WantedBy=timers.target
